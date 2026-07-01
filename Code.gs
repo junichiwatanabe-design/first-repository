@@ -1,4 +1,4 @@
-// 列構成（タスク一覧・ガントチャート共通）: A=タスク名, B=担当者, C=カテゴリ, D=優先度, E=ステータス, F=開始日, G=締切日, H=予定工数(h), I=実績工数(h), J=ブロッカー
+// タスク一覧 列構成: A=担当者, B=タスク名, C=カテゴリ, D=優先度, E=ステータス, F=開始日, G=締切日, H=予定工数(h), I=実績工数(h), J=ブロッカー
 var TASK_SHEET_NAME = 'タスク一覧';
 
 function onOpen() {
@@ -47,12 +47,12 @@ function addDataValidation(taskSheet) {
       .setAllowInvalid(false).build());
 }
 
-// ガントチャート週別ワークロード用SUMPRODUCT数式を返す
-// タスク一覧: B列=担当者, F列=開始日, G列=締切日, H列=予定工数
-// 週開始日セル: weekStartCell (例: "C3"), 担当者セル: memberCell (例: "$B4")
-function ganttWorkloadFormula(memberCell, weekStartCell) {
+// 週別ワークロード用SUMPRODUCT数式を返す
+// タスク一覧: A列=担当者, F列=開始日, G列=締切日, H列=予定工数
+// 週別ワークロード: A列=担当者（memberCell例: "$A4"）、週開始日セル例: "C3"
+function weeklyWorkloadFormula(memberCell, weekStartCell) {
   return 'IF(' + memberCell + '="","",IFERROR(SUMPRODUCT('
-    + '(\'タスク一覧\'!$B$2:$B$1000=' + memberCell + ')'
+    + '(\'タスク一覧\'!$A$2:$A$1000=' + memberCell + ')'
     + '*(\'タスク一覧\'!$F$2:$F$1000<=' + weekStartCell + '+6)'
     + '*(\'タスク一覧\'!$G$2:$G$1000>=' + weekStartCell + ')'
     + '*(\'タスク一覧\'!$H$2:$H$1000)'
@@ -76,7 +76,6 @@ function setupKpiSheet(ss, taskSheet) {
   kpiSheet.getRange('B4').setValue(0);
 
   var rows = [
-    // 担当者=B列、ステータス=E列、実績工数=I列（タスク一覧・ガントチャート共通列構成）
     ['今週の総実績工数(h)', "=SUMIF('" + sn + "'!E:E,\"<>完了\",'" + sn + "'!I:I)", ''],
     ['人時生産性（円/h）', '=IFERROR(B4/B5,"入力してください")', '15000'],
     ['目標達成率', '=IFERROR(B6/15000,"---")', '100%'],
