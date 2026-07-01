@@ -13,12 +13,12 @@ function onOpen() {
 // 週別ワークロードのヘッダー行（"6/29週"等のテキスト）を日付型に変換し表示形式を m/d"週" に設定
 function fixWeeklyWorkloadHeaders() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var ganttSheet = ss.getSheetByName('ガントチャート');
-  if (!ganttSheet) {
-    SpreadsheetApp.getUi().alert('シート「ガントチャート」が見つかりません。');
+  var workloadSheet = ss.getSheetByName('週別ワークロード');
+  if (!workloadSheet) {
+    SpreadsheetApp.getUi().alert('シート「週別ワークロード」が見つかりません。');
     return;
   }
-  var data = ganttSheet.getDataRange().getValues();
+  var data = workloadSheet.getDataRange().getValues();
   var fixed = 0;
   var weekPattern = /^(\d+)\/(\d+)週$/;
   var year = new Date().getFullYear();
@@ -31,7 +31,7 @@ function fixWeeklyWorkloadHeaders() {
         var month = parseInt(m[1], 10);
         var day = parseInt(m[2], 10);
         var date = new Date(year, month - 1, day);
-        var cell = ganttSheet.getRange(r + 1, c + 1);
+        var cell = workloadSheet.getRange(r + 1, c + 1);
         cell.setValue(date);
         cell.setNumberFormat('m/d"週"');
         fixed++;
@@ -46,12 +46,12 @@ function fixWeeklyWorkloadHeaders() {
 // 週別ワークロード: ヘッダー行に日付型の週開始日、A列に担当者名
 function setupWeeklyWorkloadFormulas() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var ganttSheet = ss.getSheetByName('ガントチャート');
-  if (!ganttSheet) {
-    SpreadsheetApp.getUi().alert('シート「ガントチャート」が見つかりません。');
+  var workloadSheet = ss.getSheetByName('週別ワークロード');
+  if (!workloadSheet) {
+    SpreadsheetApp.getUi().alert('シート「週別ワークロード」が見つかりません。');
     return;
   }
-  var data = ganttSheet.getDataRange().getValues();
+  var data = workloadSheet.getDataRange().getValues();
   var headerRow = -1;
   var headerCol = -1;
 
@@ -87,14 +87,14 @@ function setupWeeklyWorkloadFormulas() {
     if (member === '' || member === '合計') break;
     for (var i = 0; i < weekCols.length; i++) {
       var c = weekCols[i];
-      var weekRef = ganttSheet.getRange(headerRow + 1, c + 1).getA1Notation().replace(/\d+/, '') + (headerRow + 1);
+      var weekRef = workloadSheet.getRange(headerRow + 1, c + 1).getA1Notation().replace(/\d+/, '') + (headerRow + 1);
       var formula = '=IF(INDIRECT("RC1",FALSE)="","",IFERROR(SUMPRODUCT('
         + "('" + TASK_SHEET_NAME + "'!$B$2:$B$1000=INDIRECT(\"RC1\",FALSE))"
         + "*('" + TASK_SHEET_NAME + "'!$F$2:$F$1000<=" + weekRef + "+6)"
         + "*('" + TASK_SHEET_NAME + "'!$G$2:$G$1000>=" + weekRef + ")"
         + "*('" + TASK_SHEET_NAME + "'!$H$2:$H$1000)"
         + '),0))';
-      ganttSheet.getRange(r + 1, c + 1).setFormula(formula);
+      workloadSheet.getRange(r + 1, c + 1).setFormula(formula);
       written++;
     }
   }
