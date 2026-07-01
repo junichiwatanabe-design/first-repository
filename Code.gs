@@ -1,4 +1,5 @@
-// タスク一覧 列構成: A=担当者, B=タスク名, C=カテゴリ, D=優先度, E=ステータス, F=開始日, G=締切日, H=予定工数(h), I=実績工数(h), J=ブロッカー
+// タスク一覧 列構成: A=タスク名, B=担当者, C=カテゴリ, D=優先度, E=ステータス, F=開始日, G=締切日, H=予定工数(h), I=実績工数(h), J=ブロッカー
+// 週別ワークロード列構成: A=担当者
 var TASK_SHEET_NAME = 'タスク一覧';
 
 function onOpen() {
@@ -48,11 +49,11 @@ function addDataValidation(taskSheet) {
 }
 
 // 週別ワークロード用SUMPRODUCT数式を返す
-// タスク一覧: A列=担当者, F列=開始日, G列=締切日, H列=予定工数
 // 週別ワークロード: A列=担当者（memberCell例: "$A4"）、週開始日セル例: "C3"
+// タスク一覧: B列=担当者, F列=開始日, G列=締切日, H列=予定工数
 function weeklyWorkloadFormula(memberCell, weekStartCell) {
   return 'IF(' + memberCell + '="","",IFERROR(SUMPRODUCT('
-    + '(\'タスク一覧\'!$A$2:$A$1000=' + memberCell + ')'
+    + '(\'タスク一覧\'!$B$2:$B$1000=' + memberCell + ')'
     + '*(\'タスク一覧\'!$F$2:$F$1000<=' + weekStartCell + '+6)'
     + '*(\'タスク一覧\'!$G$2:$G$1000>=' + weekStartCell + ')'
     + '*(\'タスク一覧\'!$H$2:$H$1000)'
