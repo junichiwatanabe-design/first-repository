@@ -20,10 +20,8 @@ function restructureTaskSheet() {
     SpreadsheetApp.getUi().alert('シート「' + TASK_SHEET_NAME + '」が見つかりません。');
     return;
   }
-  // L列（12列目）を先に削除してからJ列（10列目）を削除する順番で
-  taskSheet.deleteColumn(12); // L列（メモ）削除
-  taskSheet.deleteColumn(10); // J列（ブロッカーあり/なし）削除
-  // K列だったブロッカー内容が新J列になる
+  taskSheet.deleteColumn(12);
+  taskSheet.deleteColumn(10);
   taskSheet.getRange('J1').setValue('メモ');
   SpreadsheetApp.getUi().alert('列の整理が完了しました。続けて「すべての改善を適用」を実行してください。');
 }
@@ -60,7 +58,6 @@ function fixWeeklyWorkloadHeaders() {
 }
 
 // 週別ワークロードテーブルを探してSUMPRODUCT数式を書き込む
-// タスク一覧: B列=担当者, F列=開始日, G列=締切日, H列=予定工数
 function setupWeeklyWorkloadFormulas() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var workloadSheet = ss.getSheetByName('週別ワークロード');
@@ -133,62 +130,78 @@ function setupSummaryTables() {
 
 function setupPersonSummary(sheet) {
   var headers = ['担当者', '総タスク数', '未着手', '進行中', 'レビュー中', '完了', 'ブロック中', '予定工数(h)', '実績工数(h)'];
+  var skipValues = ['担当者', 'カテゴリ'];
+
+  // ヘッダー書き込み前にデータを読む
+  var data = sheet.getDataRange().getValues();
+
+  // ヘッダーを１行目に書き込む
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
 
-  var data = sheet.getDataRange().getValues();
-  var lastRow = 1;
+  // 2行目以降で本物の担当者名が入っている行にのみ数式を書き込む
+  var written = 0;
   for (var r = 1; r < data.length; r++) {
-    if (String(data[r][0]).trim() !== '') lastRow = r + 1;
-  }
-
-  for (var row = 2; row <= lastRow; row++) {
+    var val = String(data[r][0]).trim();
+    if (val === '' || val.indexOf('※') === 0 || skipValues.indexOf(val) >= 0) continue;
+    var row = r + 1;
     var a = '$A' + row;
-    sheet.getRange(row, 2).setFormula("=IF(" + a + "=\"\",\"\",COUNTIF('" + TASK_SHEET_NAME + "'!$B:$B," + a + "))");
-    sheet.getRange(row, 3).setFormula("=IF(" + a + "=\"\",\"\",COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"未着手\"))");
-    sheet.getRange(row, 4).setFormula("=IF(" + a + "=\"\",\"\",COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"進行中\"))");
-    sheet.getRange(row, 5).setFormula("=IF(" + a + "=\"\",\"\",COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"レビュー中\"))");
-    sheet.getRange(row, 6).setFormula("=IF(" + a + "=\"\",\"\",COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"完了\"))");
-    sheet.getRange(row, 7).setFormula("=IF(" + a + "=\"\",\"\",COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"ブロッカー\"))");
-    sheet.getRange(row, 8).setFormula("=IF(" + a + "=\"\",\"\",SUMIF('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$H:$H))");
-    sheet.getRange(row, 9).setFormula("=IF(" + a + "=\"\",\"\",SUMIF('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$I:$I))");
+    sheet.getRange(row, 2).setFormula("=COUNTIF('" + TASK_SHEET_NAME + "'!$B:$B," + a + ")");
+    sheet.getRange(row, 3).setFormula("=COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"未着手\")");
+    sheet.getRange(row, 4).setFormula("=COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"進行中\")");
+    sheet.getRange(row, 5).setFormula("=COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"レビュー中\")");
+    sheet.getRange(row, 6).setFormula("=COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"完了\")");
+    sheet.getRange(row, 7).setFormula("=COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"ブロッカー\")");
+    sheet.getRange(row, 8).setFormula("=SUMIF('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$H:$H)");
+    sheet.getRange(row, 9).setFormula("=SUMIF('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$I:$I)");
+    written++;
   }
 
-  var dataRange = sheet.getRange(2, 1, Math.max(lastRow - 1, 1), headers.length);
-  sheet.setConditionalFormatRules([
-    SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied('=AND($A2<>"",$G2>0)')
-      .setBackground('#FF4444').setFontColor('#FFFFFF').setRanges([dataRange]).build()
-  ]);
+  if (written > 0) {
+    var dataRange = sheet.getRange(2, 1, data.length - 1, headers.length);
+    sheet.setConditionalFormatRules([
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied('=AND($A2<>"",$A2<>"※",$G2>0)')
+        .setBackground('#FF4444').setFontColor('#FFFFFF').setRanges([dataRange]).build()
+    ]);
+  }
 }
 
 function setupCategorySummary(sheet) {
   var headers = ['カテゴリ', '総タスク数', '未着手', '進行中', 'レビュー中', '完了', 'ブロック中', '予定工数(h)', '実績工数(h)'];
+  var skipValues = ['担当者', 'カテゴリ'];
+
+  // ヘッダー書き込み前にデータを読む
+  var data = sheet.getDataRange().getValues();
+
+  // ヘッダーを１行目に書き込む
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
 
-  var data = sheet.getDataRange().getValues();
-  var lastRow = 1;
+  // 2行目以降で本物のカテゴリ名が入っている行にのみ数式を書き込む
+  var written = 0;
   for (var r = 1; r < data.length; r++) {
-    if (String(data[r][0]).trim() !== '') lastRow = r + 1;
-  }
-
-  for (var row = 2; row <= lastRow; row++) {
+    var val = String(data[r][0]).trim();
+    if (val === '' || val.indexOf('※') === 0 || skipValues.indexOf(val) >= 0) continue;
+    var row = r + 1;
     var a = '$A' + row;
-    sheet.getRange(row, 2).setFormula("=IF(" + a + "=\"\",\"\",COUNTIF('" + TASK_SHEET_NAME + "'!$C:$C," + a + "))");
-    sheet.getRange(row, 3).setFormula("=IF(" + a + "=\"\",\"\",COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"未着手\"))");
-    sheet.getRange(row, 4).setFormula("=IF(" + a + "=\"\",\"\",COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"進行中\"))");
-    sheet.getRange(row, 5).setFormula("=IF(" + a + "=\"\",\"\",COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"レビュー中\"))");
-    sheet.getRange(row, 6).setFormula("=IF(" + a + "=\"\",\"\",COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"完了\"))");
-    sheet.getRange(row, 7).setFormula("=IF(" + a + "=\"\",\"\",COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"ブロッカー\"))");
-    sheet.getRange(row, 8).setFormula("=IF(" + a + "=\"\",\"\",SUMIF('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$H:$H))");
-    sheet.getRange(row, 9).setFormula("=IF(" + a + "=\"\",\"\",SUMIF('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$I:$I))");
+    sheet.getRange(row, 2).setFormula("=COUNTIF('" + TASK_SHEET_NAME + "'!$C:$C," + a + ")");
+    sheet.getRange(row, 3).setFormula("=COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"未着手\")");
+    sheet.getRange(row, 4).setFormula("=COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"進行中\")");
+    sheet.getRange(row, 5).setFormula("=COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"レビュー中\")");
+    sheet.getRange(row, 6).setFormula("=COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"完了\")");
+    sheet.getRange(row, 7).setFormula("=COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"ブロッカー\")");
+    sheet.getRange(row, 8).setFormula("=SUMIF('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$H:$H)");
+    sheet.getRange(row, 9).setFormula("=SUMIF('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$I:$I)");
+    written++;
   }
 
-  var dataRange = sheet.getRange(2, 1, Math.max(lastRow - 1, 1), headers.length);
-  sheet.setConditionalFormatRules([
-    SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied('=AND($A2<>"",$G2>0)')
-      .setBackground('#FF4444').setFontColor('#FFFFFF').setRanges([dataRange]).build()
-  ]);
+  if (written > 0) {
+    var dataRange = sheet.getRange(2, 1, data.length - 1, headers.length);
+    sheet.setConditionalFormatRules([
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied('=AND($A2<>"",$A2<>"※",$G2>0)')
+        .setBackground('#FF4444').setFontColor('#FFFFFF').setRanges([dataRange]).build()
+    ]);
+  }
 }
 
 function applyAllImprovements() {
