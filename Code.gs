@@ -1,4 +1,5 @@
 // タスク一覧 列構成: A=タスク名, B=担当者, C=カテゴリ, D=優先度, E=ステータス, F=開始日, G=締切日, H=予定工数(h), I=実績工数(h), J=メモ
+// 週別ワークロード列構成: A=担当者
 var TASK_SHEET_NAME = 'タスク一覧';
 
 function onOpen() {
@@ -18,8 +19,10 @@ function restructureTaskSheet() {
     SpreadsheetApp.getUi().alert('シート「' + TASK_SHEET_NAME + '」が見つかりません。');
     return;
   }
+  // L列（12列目）を先に削除してからJ列（10列目）を削除する順番で
   taskSheet.deleteColumn(12); // L列（メモ）削除
   taskSheet.deleteColumn(10); // J列（ブロッカーあり/なし）削除
+  // K列だったブロッカー内容が新J列になる
   taskSheet.getRange('J1').setValue('メモ');
   SpreadsheetApp.getUi().alert('列の整理が完了しました。続けて「すべての改善を適用」を実行してください。');
 }
@@ -56,6 +59,7 @@ function fixWeeklyWorkloadHeaders() {
 }
 
 // 週別ワークロードテーブルを探してSUMPRODUCT数式を書き込む
+// タスク一覧: B列=担当者, F列=開始日, G列=締切日, H列=予定工数
 function setupWeeklyWorkloadFormulas() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var workloadSheet = ss.getSheetByName('週別ワークロード');
