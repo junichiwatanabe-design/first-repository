@@ -5,7 +5,8 @@ var TASK_SHEET_NAME = 'タスク一覧';
 function onOpen() {
   SpreadsheetApp.getActiveSpreadsheet().addMenu('タスク管理', [
     {name: 'すべての改善を適用', functionName: 'applyAllImprovements'},
-    {name: '週別ワークロードヘッダーを日付型に修正', functionName: 'fixWeeklyWorkloadHeaders'}
+    {name: '週別ワークロードヘッダーを日付型に修正', functionName: 'fixWeeklyWorkloadHeaders'},
+    {name: '週別ワークロード数式を書き込む', functionName: 'setupWeeklyWorkloadFormulas'}
   ]);
 }
 
@@ -38,6 +39,66 @@ function fixWeeklyWorkloadHeaders() {
     }
   }
   SpreadsheetApp.getUi().alert(fixed + '件のヘッダーを日付型に変換しました。');
+}
+
+// 週別ワークロードテーブルを探してSUMPRODUCT数式を書き込む
+// タスク一覧: B列=担当者, F列=開始日, G列=締切日, H列=予定工数
+// 週別ワークロード: ヘッダー行に日付型の週開始日、A列に担当者名
+function setupWeeklyWorkloadFormulas() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ganttSheet = ss.getSheetByName('ガントチャート');
+  if (!ganttSheet) {
+    SpreadsheetApp.getUi().alert('シート「ガントチャート」が見つかりません。');
+    return;
+  }
+  var data = ganttSheet.getDataRange().getValues();
+  var headerRow = -1;
+  var headerCol = -1;
+
+  // 「担当者」ラベルがA列にあり、同行に日付型の値が並んでいる行を探す
+  for (var r = 0; r < data.length; r++) {
+    if (String(data[r][0]).trim() === '担当者') {
+      for (var c = 1; c < data[r].length; c++) {
+        if (data[r][c] instanceof Date) {
+          headerRow = r;
+          headerCol = c;
+          break;
+        }
+      }
+      if (headerRow >= 0) break;
+    }
+  }
+
+  if (headerRow < 0) {
+    SpreadsheetApp.getUi().alert('週別ワークロードのヘッダー行が見つかりません。\nまず「週別ワークロードヘッダーを日付型に修正」を実行してください。');
+    return;
+  }
+
+  // ヘッダー行の日付セル列を収集
+  var weekCols = [];
+  for (var c = 1; c < data[headerRow].length; c++) {
+    if (data[headerRow][c] instanceof Date) weekCols.push(c);
+  }
+
+  // ヘッダー行の次の行からメンバー行に数式を書き込む
+  var written = 0;
+  for (var r = headerRow + 1; r < data.length; r++) {
+    var member = String(data[r][0]).trim();
+    if (member === '' || member === '合計') break;
+    for (var i = 0; i < weekCols.length; i++) {
+      var c = weekCols[i];
+      var weekRef = ganttSheet.getRange(headerRow + 1, c + 1).getA1Notation().replace(/\d+/, '') + (headerRow + 1);
+      var formula = '=IF(INDIRECT("RC1",FALSE)="","",IFERROR(SUMPRODUCT('
+        + "('" + TASK_SHEET_NAME + "'!$B$2:$B$1000=INDIRECT(\"RC1\",FALSE))"
+        + "*('" + TASK_SHEET_NAME + "'!$F$2:$F$1000<=" + weekRef + "+6)"
+        + "*('" + TASK_SHEET_NAME + "'!$G$2:$G$1000>=" + weekRef + ")"
+        + "*('" + TASK_SHEET_NAME + "'!$H$2:$H$1000)"
+        + '),0))';
+      ganttSheet.getRange(r + 1, c + 1).setFormula(formula);
+      written++;
+    }
+  }
+  SpreadsheetApp.getUi().alert(written + '件のセルに数式を書き込みました。');
 }
 
 function applyAllImprovements() {
