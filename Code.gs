@@ -7,6 +7,7 @@ function onOpen() {
     {name: 'すべての改善を適用', functionName: 'applyAllImprovements'},
     {name: 'シート構成を更新（列整理）', functionName: 'restructureTaskSheet'},
     {name: '集計テーブルを更新', functionName: 'setupSummaryTables'},
+    {name: '週ヘッダーを生成して数式を書き込む', functionName: 'setupWeeklyWorkloadHeaders'},
     {name: '週別ワークロードヘッダーを日付型に修正', functionName: 'fixWeeklyWorkloadHeaders'},
     {name: '週別ワークロード数式を書き込む', functionName: 'setupWeeklyWorkloadFormulas'}
   ]);
@@ -20,12 +21,58 @@ function restructureTaskSheet() {
     SpreadsheetApp.getUi().alert('シート「' + TASK_SHEET_NAME + '」が見つかりません。');
     return;
   }
-  // L列（12列目）を先に削除してからJ列（10列目）を削除する順番で
-  taskSheet.deleteColumn(12); // L列（メモ）削除
-  taskSheet.deleteColumn(10); // J列（ブロッカーあり/なし）削除
-  // K列だったブロッカー内容が新J列になる
+  taskSheet.deleteColumn(12);
+  taskSheet.deleteColumn(10);
   taskSheet.getRange('J1').setValue('メモ');
   SpreadsheetApp.getUi().alert('列の整理が完了しました。続けて「すべての改善を適用」を実行してください。');
+}
+
+// タスク一覧のF列(開始日)・G列(締切日)から期間を算出し、週別ワークロードのB3～に週開始日を自動生成
+function setupWeeklyWorkloadHeaders() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var taskSheet = ss.getSheetByName(TASK_SHEET_NAME);
+  var workloadSheet = ss.getSheetByName('週別ワークロード');
+  if (!taskSheet || !workloadSheet) {
+    SpreadsheetApp.getUi().alert('シートが見つかりません。');
+    return;
+  }
+
+  var taskData = taskSheet.getRange('F2:G1000').getValues();
+  var minDate = null, maxDate = null;
+  for (var i = 0; i < taskData.length; i++) {
+    var start = taskData[i][0], end = taskData[i][1];
+    if (start instanceof Date && !isNaN(start)) {
+      if (!minDate || start < minDate) minDate = start;
+    }
+    if (end instanceof Date && !isNaN(end)) {
+      if (!maxDate || end > maxDate) maxDate = end;
+    }
+  }
+
+  if (!minDate || !maxDate) {
+    SpreadsheetApp.getUi().alert('タスク一覧に開始日・締切日が入力されていません。');
+    return;
+  }
+
+  // 最小日を含む週の月曜日を基点にする
+  var day = minDate.getDay();
+  var offset = (day === 0) ? -6 : 1 - day;
+  var weekStart = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate() + offset);
+
+  var col = 2; // B列から開始
+  var written = 0;
+  var current = new Date(weekStart);
+  while (current <= maxDate) {
+    var cell = workloadSheet.getRange(3, col);
+    cell.setValue(new Date(current));
+    cell.setNumberFormat('m/d"週"');
+    col++;
+    written++;
+    current.setDate(current.getDate() + 7);
+  }
+
+  SpreadsheetApp.getUi().alert(written + '週分のヘッダーを生成しました。続けて数式を書き込みます。');
+  setupWeeklyWorkloadFormulas();
 }
 
 // 週別ワークロードのヘッダー行（"6/29週"等のテキスト）を日付型に変換し表示形式を m/d"週" に設定
@@ -84,7 +131,7 @@ function setupWeeklyWorkloadFormulas() {
   }
 
   if (headerRow < 0) {
-    SpreadsheetApp.getUi().alert('週別ワークロードのヘッダー行が見つかりません。\nまず「週別ワークロードヘッダーを日付型に修正」を実行してください。');
+    SpreadsheetApp.getUi().alert('週別ワークロードのヘッダー行が見つかりません。\nまず「週ヘッダーを生成して数式を書き込む」を実行してください。');
     return;
   }
 
