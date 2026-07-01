@@ -4,8 +4,40 @@ var TASK_SHEET_NAME = 'タスク一覧';
 
 function onOpen() {
   SpreadsheetApp.getActiveSpreadsheet().addMenu('タスク管理', [
-    {name: 'すべての改善を適用', functionName: 'applyAllImprovements'}
+    {name: 'すべての改善を適用', functionName: 'applyAllImprovements'},
+    {name: '週別ワークロードヘッダーを日付型に修正', functionName: 'fixWeeklyWorkloadHeaders'}
   ]);
+}
+
+// 週別ワークロードのヘッダー行（"6/29週"等のテキスト）を日付型に変換し表示形式を m/d"週" に設定
+function fixWeeklyWorkloadHeaders() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ganttSheet = ss.getSheetByName('ガントチャート');
+  if (!ganttSheet) {
+    SpreadsheetApp.getUi().alert('シート「ガントチャート」が見つかりません。');
+    return;
+  }
+  var data = ganttSheet.getDataRange().getValues();
+  var fixed = 0;
+  var weekPattern = /^(\d+)\/(\d+)週$/;
+  var year = new Date().getFullYear();
+
+  for (var r = 0; r < data.length; r++) {
+    for (var c = 0; c < data[r].length; c++) {
+      var val = String(data[r][c]);
+      var m = val.match(weekPattern);
+      if (m) {
+        var month = parseInt(m[1], 10);
+        var day = parseInt(m[2], 10);
+        var date = new Date(year, month - 1, day);
+        var cell = ganttSheet.getRange(r + 1, c + 1);
+        cell.setValue(date);
+        cell.setNumberFormat('m/d"週"');
+        fixed++;
+      }
+    }
+  }
+  SpreadsheetApp.getUi().alert(fixed + '件のヘッダーを日付型に変換しました。');
 }
 
 function applyAllImprovements() {
