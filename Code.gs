@@ -1,4 +1,4 @@
-// タスク一覧 列構成: A=タスク名, B=担当者, C=カテゴリ, D=優先度, E=ステータス, F=開始日, G=締切日, H=予定工数(h), I=実績工数(h), J=メモ, K=アラート
+// タスク一覧 列構成: A=タスク名, B=担当者, C=カテゴリ, D=優先度, E=ステータス, F=開始日, G=締切日, H=予定工数(h), I=実績工数(h), J=メモ
 // 週別ワークロード列構成: A=担当者
 var TASK_SHEET_NAME = 'タスク一覧';
 
@@ -20,8 +20,10 @@ function restructureTaskSheet() {
     SpreadsheetApp.getUi().alert('シート「' + TASK_SHEET_NAME + '」が見つかりません。');
     return;
   }
-  taskSheet.deleteColumn(12);
-  taskSheet.deleteColumn(10);
+  // L列（12列目）を先に削除してからJ列（10列目）を削除する順番で
+  taskSheet.deleteColumn(12); // L列（メモ）削除
+  taskSheet.deleteColumn(10); // J列（ブロッカーあり/なし）削除
+  // K列だったブロッカー内容が新J列になる
   taskSheet.getRange('J1').setValue('メモ');
   SpreadsheetApp.getUi().alert('列の整理が完了しました。続けて「すべての改善を適用」を実行してください。');
 }
@@ -58,6 +60,7 @@ function fixWeeklyWorkloadHeaders() {
 }
 
 // 週別ワークロードテーブルを探してSUMPRODUCT数式を書き込む
+// タスク一覧: B列=担当者, F列=開始日, G列=締切日, H列=予定工数
 function setupWeeklyWorkloadFormulas() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var workloadSheet = ss.getSheetByName('週別ワークロード');
@@ -96,12 +99,13 @@ function setupWeeklyWorkloadFormulas() {
     if (member === '' || member === '合計') break;
     for (var i = 0; i < weekCols.length; i++) {
       var c = weekCols[i];
-      var weekRef = workloadSheet.getRange(headerRow + 1, c + 1).getA1Notation().replace(/\d+/, '') + (headerRow + 1);
+      var weekDate = data[headerRow][c];
+      var dateStr = 'DATE(' + weekDate.getFullYear() + ',' + (weekDate.getMonth() + 1) + ',' + weekDate.getDate() + ')';
       var rowNum = r + 1;
       var formula = '=IF($A' + rowNum + '="","",IFERROR(SUMPRODUCT('
         + "('" + TASK_SHEET_NAME + "'!$B$2:$B$1000=$A" + rowNum + ')'
-        + "*('" + TASK_SHEET_NAME + "'!$F$2:$F$1000<=" + weekRef + "+6)"
-        + "*('" + TASK_SHEET_NAME + "'!$G$2:$G$1000>=" + weekRef + ")"
+        + "*('" + TASK_SHEET_NAME + "'!$F$2:$F$1000<=" + dateStr + "+6)"
+        + "*('" + TASK_SHEET_NAME + "'!$G$2:$G$1000>=" + dateStr + ")"
         + "*('" + TASK_SHEET_NAME + "'!$H$2:$H$1000)"
         + '),0))';
       workloadSheet.getRange(r + 1, c + 1).setFormula(formula);
@@ -132,9 +136,13 @@ function setupPersonSummary(sheet) {
   var headers = ['担当者', '総タスク数', '未着手', '進行中', 'レビュー中', '完了', 'ブロック中', '予定工数(h)', '実績工数(h)', 'アラート'];
   var skipValues = ['担当者', 'カテゴリ'];
 
+  // ヘッダー書き込み前にデータを読む
   var data = sheet.getDataRange().getValues();
+
+  // ヘッダーを1行目に書き込む
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
 
+  // 2行目以降で本物の担当者名が入っている行にのみ数式を書き込む
   var written = 0;
   for (var r = 1; r < data.length; r++) {
     var val = String(data[r][0]).trim();
@@ -152,7 +160,7 @@ function setupPersonSummary(sheet) {
     sheet.getRange(row, 10).setFormula(
       "=IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"ブロッカー\")>0,\"ブロッカー\"," +
       "IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$G:$G,\"<\"&TODAY(),'" + TASK_SHEET_NAME + "'!$E:$E,\"<>完了\")>0,\"期限超過\"," +
-      "IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$G:$G,\">=\"&TODAY(),'" + TASK_SHEET_NAME + "'!$G:$G,\"<=\"&TODAY()+3,'" + TASK_SHEET_NAME + "'!$E:$E,\"<>完了\")>0,\"期限間近\",\"\")))"
+      "IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$G:$G,\">="&TODAY(),'" + TASK_SHEET_NAME + "'!$G:$G,\"<="&TODAY()+3,'" + TASK_SHEET_NAME + "'!$E:$E,\"<>完了\")>0,\"期限間近\",\"\")))"
     );
     written++;
   }
@@ -177,9 +185,13 @@ function setupCategorySummary(sheet) {
   var headers = ['カテゴリ', '総タスク数', '未着手', '進行中', 'レビュー中', '完了', 'ブロック中', '予定工数(h)', '実績工数(h)', 'アラート'];
   var skipValues = ['担当者', 'カテゴリ'];
 
+  // ヘッダー書き込み前にデータを読む
   var data = sheet.getDataRange().getValues();
+
+  // ヘッダーを1行目に書き込む
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
 
+  // 2行目以降で本物のカテゴリ名が入っている行にのみ数式を書き込む
   var written = 0;
   for (var r = 1; r < data.length; r++) {
     var val = String(data[r][0]).trim();
@@ -197,7 +209,7 @@ function setupCategorySummary(sheet) {
     sheet.getRange(row, 10).setFormula(
       "=IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"ブロッカー\")>0,\"ブロッカー\"," +
       "IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$G:$G,\"<\"&TODAY(),'" + TASK_SHEET_NAME + "'!$E:$E,\"<>完了\")>0,\"期限超過\"," +
-      "IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$G:$G,\">=\"&TODAY(),'" + TASK_SHEET_NAME + "'!$G:$G,\"<=\"&TODAY()+3,'" + TASK_SHEET_NAME + "'!$E:$E,\"<>完了\")>0,\"期限間近\",\"\")))"
+      "IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$G:$G,\">="&TODAY(),'" + TASK_SHEET_NAME + "'!$G:$G,\"<="&TODAY()+3,'" + TASK_SHEET_NAME + "'!$E:$E,\"<>完了\")>0,\"期限間近\",\"\")))"
     );
     written++;
   }
