@@ -1,13 +1,27 @@
-// タスク一覧 列構成: A=タスク名, B=担当者, C=カテゴリ, D=優先度, E=ステータス, F=開始日, G=締切日, H=予定工数(h), I=実績工数(h), J=ブロッカー
-// 週別ワークロード列構成: A=担当者
+// タスク一覧 列構成: A=タスク名, B=担当者, C=カテゴリ, D=優先度, E=ステータス, F=開始日, G=締切日, H=予定工数(h), I=実績工数(h), J=メモ
 var TASK_SHEET_NAME = 'タスク一覧';
 
 function onOpen() {
   SpreadsheetApp.getActiveSpreadsheet().addMenu('タスク管理', [
     {name: 'すべての改善を適用', functionName: 'applyAllImprovements'},
+    {name: 'シート構成を更新（列整理）', functionName: 'restructureTaskSheet'},
     {name: '週別ワークロードヘッダーを日付型に修正', functionName: 'fixWeeklyWorkloadHeaders'},
     {name: '週別ワークロード数式を書き込む', functionName: 'setupWeeklyWorkloadFormulas'}
   ]);
+}
+
+// タスク一覧の列を整理: J列(ブロッカーあり/なし)削除、K列(ブロッカー内容)→J列(メモ)、L列(メモ)削除
+function restructureTaskSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var taskSheet = ss.getSheetByName(TASK_SHEET_NAME);
+  if (!taskSheet) {
+    SpreadsheetApp.getUi().alert('シート「' + TASK_SHEET_NAME + '」が見つかりません。');
+    return;
+  }
+  taskSheet.deleteColumn(12); // L列（メモ）削除
+  taskSheet.deleteColumn(10); // J列（ブロッカーあり/なし）削除
+  taskSheet.getRange('J1').setValue('メモ');
+  SpreadsheetApp.getUi().alert('列の整理が完了しました。続けて「すべての改善を適用」を実行してください。');
 }
 
 // 週別ワークロードのヘッダー行（"6/29週"等のテキスト）を日付型に変換し表示形式を m/d"週" に設定
@@ -42,8 +56,6 @@ function fixWeeklyWorkloadHeaders() {
 }
 
 // 週別ワークロードテーブルを探してSUMPRODUCT数式を書き込む
-// タスク一覧: B列=担当者, F列=開始日, G列=締切日, H列=予定工数
-// 週別ワークロード: ヘッダー行に日付型の週開始日、A列に担当者名
 function setupWeeklyWorkloadFormulas() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var workloadSheet = ss.getSheetByName('週別ワークロード');
@@ -53,15 +65,12 @@ function setupWeeklyWorkloadFormulas() {
   }
   var data = workloadSheet.getDataRange().getValues();
   var headerRow = -1;
-  var headerCol = -1;
 
-  // 「担当者」ラベルがA列にあり、同行に日付型の値が並んでいる行を探す
   for (var r = 0; r < data.length; r++) {
     if (String(data[r][0]).trim() === '担当者') {
       for (var c = 1; c < data[r].length; c++) {
         if (data[r][c] instanceof Date) {
           headerRow = r;
-          headerCol = c;
           break;
         }
       }
@@ -74,13 +83,11 @@ function setupWeeklyWorkloadFormulas() {
     return;
   }
 
-  // ヘッダー行の日付セル列を収集
   var weekCols = [];
   for (var c = 1; c < data[headerRow].length; c++) {
     if (data[headerRow][c] instanceof Date) weekCols.push(c);
   }
 
-  // ヘッダー行の次の行からメンバー行に数式を書き込む
   var written = 0;
   for (var r = headerRow + 1; r < data.length; r++) {
     var member = String(data[r][0]).trim();
@@ -88,8 +95,9 @@ function setupWeeklyWorkloadFormulas() {
     for (var i = 0; i < weekCols.length; i++) {
       var c = weekCols[i];
       var weekRef = workloadSheet.getRange(headerRow + 1, c + 1).getA1Notation().replace(/\d+/, '') + (headerRow + 1);
-      var formula = '=IF(INDIRECT("RC1",FALSE)="","",IFERROR(SUMPRODUCT('
-        + "('" + TASK_SHEET_NAME + "'!$B$2:$B$1000=INDIRECT(\"RC1\",FALSE))"
+      var rowNum = r + 1;
+      var formula = '=IF($A' + rowNum + '="","",IFERROR(SUMPRODUCT('
+        + "('" + TASK_SHEET_NAME + "'!$B$2:$B$1000=$A" + rowNum + ')'
         + "*('" + TASK_SHEET_NAME + "'!$F$2:$F$1000<=" + weekRef + "+6)"
         + "*('" + TASK_SHEET_NAME + "'!$G$2:$G$1000>=" + weekRef + ")"
         + "*('" + TASK_SHEET_NAME + "'!$H$2:$H$1000)"
@@ -115,41 +123,34 @@ function applyAllImprovements() {
 }
 
 function applyConditionalFormatting(taskSheet) {
-  var rules = taskSheet.getConditionalFormatRules();
-  var range = taskSheet.getRange('A2:K100');
-  rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=AND($G2<TODAY(),$E2<>"完了",$G2<>"")')
-    .setBackground('#FFCCCC').setRanges([range]).build());
-  rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$J2="あり"')
-    .setBackground('#FFF3CD').setRanges([range]).build());
-  taskSheet.setConditionalFormatRules(rules);
+  var range = taskSheet.getRange('A2:J100');
+  taskSheet.setConditionalFormatRules([
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=AND($G2<TODAY(),$E2<>"完了",$G2<>"")')
+      .setBackground('#FFCCCC').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=$E2="ブロッカー"')
+      .setBackground('#FF4444').setFontColor('#FFFFFF').setRanges([range]).build()
+  ]);
 }
 
 function addDataValidation(taskSheet) {
   taskSheet.getRange('E2:E100').setDataValidation(
     SpreadsheetApp.newDataValidation()
-      .requireValueInList(['未着手', '進行中', 'レビュー中', '完了', '保留'], true)
+      .requireValueInList(['未着手', '進行中', 'レビュー中', 'ブロッカー', '完了'], true)
       .setAllowInvalid(false).build());
   taskSheet.getRange('D2:D100').setDataValidation(
     SpreadsheetApp.newDataValidation()
       .requireValueInList(['高', '中', '低'], true)
       .setAllowInvalid(false).build());
-  taskSheet.getRange('J2:J100').setDataValidation(
-    SpreadsheetApp.newDataValidation()
-      .requireValueInList(['あり', 'なし'], true)
-      .setAllowInvalid(false).build());
 }
 
-// 週別ワークロード用SUMPRODUCT数式を返す
-// 週別ワークロード: A列=担当者（memberCell例: "$A4"）、週開始日セル例: "C3"
-// タスク一覧: B列=担当者, F列=開始日, G列=締切日, H列=予定工数
 function weeklyWorkloadFormula(memberCell, weekStartCell) {
   return 'IF(' + memberCell + '="","",IFERROR(SUMPRODUCT('
-    + '(\'タスク一覧\'!$B$2:$B$1000=' + memberCell + ')'
-    + '*(\'タスク一覧\'!$F$2:$F$1000<=' + weekStartCell + '+6)'
-    + '*(\'タスク一覧\'!$G$2:$G$1000>=' + weekStartCell + ')'
-    + '*(\'タスク一覧\'!$H$2:$H$1000)'
+    + '(\'' + TASK_SHEET_NAME + '\'!$B$2:$B$1000=' + memberCell + ')'
+    + '*(\'' + TASK_SHEET_NAME + '\'!$F$2:$F$1000<=' + weekStartCell + '+6)'
+    + '*(\'' + TASK_SHEET_NAME + '\'!$G$2:$G$1000>=' + weekStartCell + ')'
+    + '*(\'' + TASK_SHEET_NAME + '\'!$H$2:$H$1000)'
     + '),0))';
 }
 
@@ -160,11 +161,10 @@ function setupKpiSheet(ss, taskSheet) {
   var sn = taskSheet.getName();
 
   kpiSheet.getRange('A1').setValue('キッチン部門 KPIダッシュボード').setFontSize(16).setFontWeight('bold');
-  var header = kpiSheet.getRange('A3:C3');
   kpiSheet.getRange('A3').setValue('指標');
   kpiSheet.getRange('B3').setValue('現在値');
   kpiSheet.getRange('C3').setValue('目標');
-  header.setBackground('#4A90D9').setFontColor('#FFFFFF').setFontWeight('bold');
+  kpiSheet.getRange('A3:C3').setBackground('#4A90D9').setFontColor('#FFFFFF').setFontWeight('bold');
 
   kpiSheet.getRange('A4').setValue('今週の売上（円）※手動入力');
   kpiSheet.getRange('B4').setValue(0);
@@ -174,7 +174,7 @@ function setupKpiSheet(ss, taskSheet) {
     ['人時生産性（円/h）', '=IFERROR(B4/B5,"入力してください")', '15000'],
     ['目標達成率', '=IFERROR(B6/15000,"---")', '100%'],
     ['締切超過タスク数', "=COUNTIFS('" + sn + "'!G:G,\"<\"&TODAY(),'" + sn + "'!E:E,\"<>完了\",'" + sn + "'!G:G,\"<>\"&\"\")", '0'],
-    ['ブロック中タスク数', "=COUNTIF('" + sn + "'!J:J,\"あり\")", '0']
+    ['ブロッカータスク数', "=COUNTIF('" + sn + "'!E:E,\"ブロッカー\")", '0']
   ];
   for (var i = 0; i < rows.length; i++) {
     kpiSheet.getRange(5 + i, 1).setValue(rows[i][0]);
