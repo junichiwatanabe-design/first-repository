@@ -136,13 +136,9 @@ function setupPersonSummary(sheet) {
   var headers = ['担当者', '総タスク数', '未着手', '進行中', 'レビュー中', '完了', 'ブロック中', '予定工数(h)', '実績工数(h)', 'アラート'];
   var skipValues = ['担当者', 'カテゴリ'];
 
-  // ヘッダー書き込み前にデータを読む
   var data = sheet.getDataRange().getValues();
-
-  // ヘッダーを1行目に書き込む
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
 
-  // 2行目以降で本物の担当者名が入っている行にのみ数式を書き込む
   var written = 0;
   for (var r = 1; r < data.length; r++) {
     var val = String(data[r][0]).trim();
@@ -160,7 +156,7 @@ function setupPersonSummary(sheet) {
     sheet.getRange(row, 10).setFormula(
       "=IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"ブロッカー\")>0,\"ブロッカー\"," +
       "IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$G:$G,\"<\"&TODAY(),'" + TASK_SHEET_NAME + "'!$E:$E,\"<>完了\")>0,\"期限超過\"," +
-      "IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$G:$G,\">="&TODAY(),'" + TASK_SHEET_NAME + "'!$G:$G,\"<="&TODAY()+3,'" + TASK_SHEET_NAME + "'!$E:$E,\"<>完了\")>0,\"期限間近\",\"\")))"
+      "IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$B:$B," + a + ",'" + TASK_SHEET_NAME + "'!$G:$G,\">="+"\"&TODAY(),'" + TASK_SHEET_NAME + "'!$G:$G,\"<="+"\"&TODAY()+3,'" + TASK_SHEET_NAME + "'!$E:$E,\"<>完了\")>0,\"期限間近\",\"\")))"
     );
     written++;
   }
@@ -185,13 +181,9 @@ function setupCategorySummary(sheet) {
   var headers = ['カテゴリ', '総タスク数', '未着手', '進行中', 'レビュー中', '完了', 'ブロック中', '予定工数(h)', '実績工数(h)', 'アラート'];
   var skipValues = ['担当者', 'カテゴリ'];
 
-  // ヘッダー書き込み前にデータを読む
   var data = sheet.getDataRange().getValues();
-
-  // ヘッダーを1行目に書き込む
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
 
-  // 2行目以降で本物のカテゴリ名が入っている行にのみ数式を書き込む
   var written = 0;
   for (var r = 1; r < data.length; r++) {
     var val = String(data[r][0]).trim();
@@ -209,7 +201,7 @@ function setupCategorySummary(sheet) {
     sheet.getRange(row, 10).setFormula(
       "=IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$E:$E,\"ブロッカー\")>0,\"ブロッカー\"," +
       "IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$G:$G,\"<\"&TODAY(),'" + TASK_SHEET_NAME + "'!$E:$E,\"<>完了\")>0,\"期限超過\"," +
-      "IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$G:$G,\">="&TODAY(),'" + TASK_SHEET_NAME + "'!$G:$G,\"<="&TODAY()+3,'" + TASK_SHEET_NAME + "'!$E:$E,\"<>完了\")>0,\"期限間近\",\"\")))"
+      "IF(COUNTIFS('" + TASK_SHEET_NAME + "'!$C:$C," + a + ",'" + TASK_SHEET_NAME + "'!$G:$G,\">="+"\"&TODAY(),'" + TASK_SHEET_NAME + "'!$G:$G,\"<="+"\"&TODAY()+3,'" + TASK_SHEET_NAME + "'!$E:$E,\"<>完了\")>0,\"期限間近\",\"\")))"
     );
     written++;
   }
