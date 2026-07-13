@@ -72,6 +72,7 @@ function importFiveDaysData() {
     }
 
     var aggregatedRows = [];
+    var blocks = [];
     var warnings = [];
     matchedFiles.forEach(function (f) {
       var sourceSheet;
@@ -86,7 +87,10 @@ function importFiveDaysData() {
         return;
       }
       var values = sourceSheet.getDataRange().getValues();
-      aggregatedRows = aggregatedRows.concat(values);
+      if (values.length > 0) {
+        blocks.push({ startIndex: aggregatedRows.length, rowCount: values.length });
+        aggregatedRows = aggregatedRows.concat(values);
+      }
     });
 
     var outputSheet = getOrClearSheet_(ss, dateStr);
@@ -100,7 +104,12 @@ function importFiveDaysData() {
         }
         return row.concat(new Array(maxCols - row.length).fill(''));
       });
-      outputSheet.getRange(1, 1, paddedRows.length, maxCols).setValues(paddedRows);
+      var writeRange = outputSheet.getRange(1, 1, paddedRows.length, maxCols);
+      writeRange.setValues(paddedRows);
+      writeRange.setFontSize(10).setFontWeight('normal');
+      blocks.forEach(function (block) {
+        applyHighlightFormatting_(outputSheet, block.startIndex + 1, block.rowCount);
+      });
     }
 
     var line = dateStr + ': ' + matchedFiles.length + '件のファイルから' + aggregatedRows.length + '行を書き込みました';
@@ -111,6 +120,26 @@ function importFiveDaysData() {
   }
 
   ui.alert(summaryLines.join('\n'));
+}
+
+function applyHighlightFormatting_(sheet, blockStartRow, blockRowCount) {
+  var FONT_SIZE = 14;
+  function absRow(relRow) {
+    return blockStartRow + relRow - 1;
+  }
+
+  if (blockRowCount >= 4) {
+    sheet.getRange(absRow(4), 6).setFontSize(FONT_SIZE).setFontWeight('bold'); // F4 案件実施日
+  }
+  if (blockRowCount >= 6) {
+    sheet.getRange(absRow(6), 6).setFontSize(FONT_SIZE).setFontWeight('bold'); // F6 時刻
+  }
+  if (blockRowCount >= 19) {
+    sheet.getRange(absRow(11), 14, 9, 1).setFontSize(FONT_SIZE).setFontWeight('bold'); // N11:N19 メニュー名
+  }
+  if (blockRowCount >= 42) {
+    sheet.getRange(absRow(27), 5, 16, 4).setFontSize(FONT_SIZE).setFontWeight('bold'); // E27:H42 数量
+  }
 }
 
 function collectSpreadsheetFiles_(folder, excludeFileId) {
