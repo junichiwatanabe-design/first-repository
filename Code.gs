@@ -15,6 +15,8 @@ var SECONDARY_FONT_SIZE = 16;
 var HIGHLIGHT_FONT_SIZE = 20;
 var HEADER_BACKGROUND = '#f3f3f3';
 var CHECKED_BACKGROUND = '#f4c7c3';
+var DARK_BACKGROUND = '#434343';
+var WHITE_FONT = '#ffffff';
 var MENU_NAME_COLUMN_SPAN = 3; // メニュー名セルをE:G相当の3列分に横結合する
 var HIDDEN_COLUMNS = [1, 4, 10]; // A, D, J
 var COLUMN_WIDTHS = {
@@ -182,17 +184,29 @@ function applyCaseFormatting_(sheet, values) {
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
 
   highlightLabelValue_(sheet, values, '案件実施日', HIGHLIGHT_FONT_SIZE, {
-    background: HEADER_BACKGROUND,
+    background: DARK_BACKGROUND,
+    fontColor: WHITE_FONT,
     align: 'center',
-    numberFormat: 'M/d'
+    numberFormat: 'M/d',
+    labelBackground: HEADER_BACKGROUND
   });
   highlightLabelValue_(sheet, values, '企業名', HIGHLIGHT_FONT_SIZE, {
-    background: HEADER_BACKGROUND,
-    align: 'center'
+    background: DARK_BACKGROUND,
+    fontColor: WHITE_FONT,
+    align: 'center',
+    labelBackground: HEADER_BACKGROUND
   });
-  highlightLabelValue_(sheet, values, '参加人数', SECONDARY_FONT_SIZE);
-  highlightLabelValue_(sheet, values, 'パーティー目的', SECONDARY_FONT_SIZE);
-  highlightLabelValue_(sheet, values, 'プランナー', SECONDARY_FONT_SIZE);
+  highlightLabelValue_(sheet, values, '参加人数', SECONDARY_FONT_SIZE, {
+    labelBackground: HEADER_BACKGROUND
+  });
+  highlightLabelValue_(sheet, values, 'パーティー目的', SECONDARY_FONT_SIZE, {
+    labelBackground: HEADER_BACKGROUND,
+    mergeRight: true
+  });
+  highlightLabelValue_(sheet, values, 'プランナー', SECONDARY_FONT_SIZE, {
+    labelBackground: HEADER_BACKGROUND,
+    mergeRight: true
+  });
 
   var menuHeader = findMenuTableHeader_(values);
   if (!menuHeader) {
@@ -206,6 +220,8 @@ function applyCaseFormatting_(sheet, values) {
       .setHorizontalAlignment('center');
     var itemCol = timeCell.col + 1; // 「項目」列（時刻の右隣）
     sheet.getRange(timeCell.row + 1, itemCol + 1, timeSectionRows, 2).mergeAcross();
+    sheet.getRange(timeCell.row + 1, timeCell.col + 1).setBackground(HEADER_BACKGROUND); // 時刻見出し
+    sheet.getRange(timeCell.row + 1, itemCol + 1, 1, 2).setBackground(HEADER_BACKGROUND); // 項目見出し
   }
 
   var headerRow1 = menuHeader.row + 1;
@@ -249,17 +265,32 @@ function highlightLabelValue_(sheet, values, labelText, fontSize, opts) {
   if (!cell) {
     return;
   }
-  sheet.getRange(cell.row + 1, cell.col + 1).setFontWeight('bold');
+  var labelRange = sheet.getRange(cell.row + 1, cell.col + 1).setFontWeight('bold');
+  if (opts && opts.labelBackground) {
+    labelRange.setBackground(opts.labelBackground);
+  }
   if (cell.col + 1 < values[cell.row].length) {
-    var valueRange = sheet.getRange(cell.row + 1, cell.col + 2).setFontSize(fontSize).setFontWeight('bold');
+    var valueCols = (opts && opts.mergeRight) ? 2 : 1;
+    var valueRange = sheet.getRange(cell.row + 1, cell.col + 2, 1, valueCols)
+      .setFontSize(fontSize)
+      .setFontWeight('bold');
     if (opts && opts.background) {
-      valueRange.setBackground(opts.background).setBorder(true, true, true, true, null, null);
+      valueRange.setBackground(opts.background);
+    }
+    if (opts && opts.fontColor) {
+      valueRange.setFontColor(opts.fontColor);
+    }
+    if (opts && opts.border) {
+      valueRange.setBorder(true, true, true, true, null, null);
     }
     if (opts && opts.align) {
       valueRange.setHorizontalAlignment(opts.align);
     }
     if (opts && opts.numberFormat) {
       valueRange.setNumberFormat(opts.numberFormat);
+    }
+    if (opts && opts.mergeRight) {
+      valueRange.mergeAcross();
     }
   }
 }
