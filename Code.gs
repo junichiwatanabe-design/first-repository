@@ -15,7 +15,6 @@ var SECONDARY_FONT_SIZE = 16;
 var HIGHLIGHT_FONT_SIZE = 20;
 var HEADER_BACKGROUND = '#f3f3f3';
 var CHECKED_BACKGROUND = '#f4c7c3';
-var HIGHLIGHT_BOX_BACKGROUND = '#d9e8fb';
 var MENU_NAME_COLUMN_SPAN = 3; // メニュー名セルをE:G相当の3列分に横結合する
 var HIDDEN_COLUMNS = [1, 4, 10]; // A, D, J
 var COLUMN_WIDTHS = {
@@ -183,12 +182,13 @@ function applyCaseFormatting_(sheet, values) {
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
 
   highlightLabelValue_(sheet, values, '案件実施日', HIGHLIGHT_FONT_SIZE, {
-    background: HIGHLIGHT_BOX_BACKGROUND,
-    align: 'left',
+    background: HEADER_BACKGROUND,
+    align: 'center',
     numberFormat: 'M/d'
   });
   highlightLabelValue_(sheet, values, '企業名', HIGHLIGHT_FONT_SIZE, {
-    background: HIGHLIGHT_BOX_BACKGROUND
+    background: HEADER_BACKGROUND,
+    align: 'center'
   });
   highlightLabelValue_(sheet, values, '参加人数', SECONDARY_FONT_SIZE);
   highlightLabelValue_(sheet, values, 'パーティー目的', SECONDARY_FONT_SIZE);
@@ -197,6 +197,15 @@ function applyCaseFormatting_(sheet, values) {
   var menuHeader = findMenuTableHeader_(values);
   if (!menuHeader) {
     return;
+  }
+
+  var timeCell = findCellByValue_(values, '時刻');
+  if (timeCell && menuHeader.row > timeCell.row) {
+    var timeSectionRows = menuHeader.row - timeCell.row; // 時刻見出し行を含む行数
+    sheet.getRange(timeCell.row + 1, timeCell.col + 1, timeSectionRows, 1)
+      .setHorizontalAlignment('center');
+    var itemCol = timeCell.col + 1; // 「項目」列（時刻の右隣）
+    sheet.getRange(timeCell.row + 1, itemCol + 1, timeSectionRows, 2).mergeAcross();
   }
 
   var headerRow1 = menuHeader.row + 1;
