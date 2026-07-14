@@ -10,6 +10,7 @@ var CONFIG_FOLDER_CELL = 'B1';
 var CONFIG_TAB_NAME_CELL = 'B2';
 var CONFIG_START_DATE_CELL = 'B3';
 var CONFIG_DAYS_CELL = 'B4';
+var CONFIG_LABEL_SS_CELL = 'B5';
 var DEFAULT_DAYS_TO_READ = 5;
 var MAX_DAYS_TO_READ = 5;
 var BASE_FONT_SIZE = 14;
@@ -32,7 +33,8 @@ var COLUMN_WIDTHS = {
 };
 var TIME_COLUMN = 14; // N列
 
-var LABEL_SHEET_NAME = 'ラベル印刷';
+var LABEL_SHEET_NAME = 'ラベル印刷'; // 旧バージョンが残していた集計用シート名（あれば案件扱いから除外する）
+var LABEL_SPREADSHEET_SUFFIX = '（ラベル印刷）';
 var LABEL_COLS = 3;
 var LABEL_ROWS = 8;
 var LABEL_COPIES_PER_ENTRY = 2; // 同一ラベルを縦に2枚配置
@@ -40,6 +42,7 @@ var LABEL_COL_WIDTH_MM = 70;   // A4・24面ラベルの一般的な実寸（商
 var LABEL_ROW_HEIGHT_MM = 33.9;
 var MM_TO_PX = 96 / 25.4;
 var LABEL_FONT_SIZE = 9;
+var LABEL_QTY_FONT_SIZE = 16; // 数量行は太字・大きめフォントで強調する
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -172,43 +175,103 @@ function deleteSheetsForDate_(ss, dateStr) {
 }
 
 /**
- * 「設定」シートを除く全案件タブから、日付・企業名・メニュー名・数量を集めて
- * A4・24面（3列×8行）のラベルシート（1件あたり縦2枚）を作成する。
- * 案件タブの内容は実行のたびに変わるため、都度シートを走査して集計する。
+ * 「設定」シートを除く案件タブごとに、日付・企業名・メニュー名・数量を集めて、
+ * ラベル専用スプレッドシート内の同名タブへ A4・24面（3列×8行）のラベル
+ * （1件あたり縦2枚）を作成する。案件タブの内容は実行のたびに変わるため、
+ * 都度シートを走査して集計する。
  */
 function generateMenuLabels() {
   var ui = SpreadsheetApp.getUi();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var configSheet = getOrCreateConfigSheet_(ss);
+  if (!configSheet) {
+    return;
+  }
   var timeZone = ss.getSpreadsheetTimeZone();
+  var labelSs = getOrCreateLabelSpreadsheet_(ss, configSheet);
 
-  var entries = [];
+  var caseSheetNames = [];
+  var createdCases = [];
+  var totalEntries = 0;
   var warnings = [];
   ss.getSheets().forEach(function (sheet) {
     var name = sheet.getName();
     if (name === CONFIG_SHEET_NAME || name === LABEL_SHEET_NAME) {
       return;
     }
+    caseSheetNames.push(name);
     try {
-      entries = entries.concat(collectLabelEntries_(sheet, timeZone));
+      var entries = collectLabelEntries_(sheet, timeZone);
+      if (entries.length === 0) {
+        return;
+      }
+      writeLabelSheetForCase_(labelSs, name, entries);
+      createdCases.push(name);
+      totalEntries += entries.length;
     } catch (e) {
       warnings.push(name + ': 処理中にエラーが発生しました（' + e.message + '）');
     }
   });
 
-  if (entries.length === 0) {
+  removeStaleLabelSheets_(labelSs, caseSheetNames);
+
+  if (createdCases.length === 0) {
     ui.alert('ラベルに出力できる案件データが見つかりませんでした。' +
       (warnings.length > 0 ? '\n警告: ' + warnings.join(' / ') : ''));
     return;
   }
 
-  writeLabelSheet_(ss, entries);
-
-  var message = entries.length + '件のメニューからラベル' +
-    (entries.length * LABEL_COPIES_PER_ENTRY) + '枚を「' + LABEL_SHEET_NAME + '」シートに作成しました。';
+  var message = createdCases.length + '件の案件・計' + totalEntries + '件のメニューから' +
+    'ラベル' + (totalEntries * LABEL_COPIES_PER_ENTRY) + '枚を作成しました。\n' +
+    labelSs.getUrl();
   if (warnings.length > 0) {
     message += '\n警告: ' + warnings.join(' / ');
   }
   ui.alert(message);
+}
+
+/**
+ * ラベル専用スプレッドシートを取得する。「設定」シートに保存済みのIDがあれば
+ * それを再利用し、なければ新規作成して同じ親フォルダに置き、IDを保存する。
+ */
+function getOrCreateLabelSpreadsheet_(ss, configSheet) {
+  var savedId = String(configSheet.getRange(CONFIG_LABEL_SS_CELL).getValue() || '').trim();
+  if (savedId) {
+    try {
+      return SpreadsheetApp.openById(savedId);
+    } catch (e) {
+      // 保存済みIDが無効（削除済みなど）の場合は新規作成にフォールバックする
+    }
+  }
+
+  var labelSs = SpreadsheetApp.create(ss.getName() + LABEL_SPREADSHEET_SUFFIX);
+  try {
+    var parents = DriveApp.getFileById(ss.getId()).getParents();
+    if (parents.hasNext()) {
+      var parentFolder = parents.next();
+      var labelFile = DriveApp.getFileById(labelSs.getId());
+      parentFolder.addFile(labelFile);
+      DriveApp.getRootFolder().removeFile(labelFile);
+    }
+  } catch (e) {
+    // フォルダ移動に失敗してもマイドライブ直下に作成されているため処理は継続する
+  }
+
+  configSheet.getRange(CONFIG_LABEL_SS_CELL).setValue(labelSs.getId());
+  return labelSs;
+}
+
+/**
+ * ラベル専用スプレッドシート内で、現在の案件タブ名に対応しないシートを削除する
+ * （案件が削除・再作成された場合に古いラベルタブが残らないようにする）。
+ */
+function removeStaleLabelSheets_(labelSs, currentCaseNames) {
+  var sheets = labelSs.getSheets();
+  sheets.forEach(function (sheet) {
+    if (currentCaseNames.indexOf(sheet.getName()) === -1 && labelSs.getSheets().length > 1) {
+      labelSs.deleteSheet(sheet);
+    }
+  });
 }
 
 function collectLabelEntries_(sheet, timeZone) {
@@ -252,22 +315,26 @@ function formatLabelDate_(value, timeZone) {
   return String(value).trim();
 }
 
+/**
+ * ラベル1件分の3行テキストを組み立てる。
+ * 1行目: 日付＋企業名、2行目: メニュー名、3行目: 数量（呼び出し側でリッチテキスト装飾する）
+ */
 function formatLabelText_(entry) {
-  var qtyText = entry.qty === '' || entry.qty == null ? '' : entry.qty + '個';
-  return entry.date + '　' + qtyText + '\n' + entry.company + '\n' + entry.menu;
+  var qtyText = entry.qty === '' || entry.qty == null ? '' : String(entry.qty);
+  return entry.date + '　' + entry.company + '\n' + entry.menu + '\n' + qtyText;
 }
 
 /**
- * entries を3列×8行のグリッドに配置する。1エントリにつき縦2行（2枚）を使い、
- * 24枚（12エントリ）ごとに次の8行ブロック＝次ページへ折り返す。
+ * 1案件分の entries を3列×8行のグリッドに配置し、labelSs内の同名タブへ書き込む。
+ * 1エントリにつき縦2行（2枚）を使い、24枚（12エントリ）ごとに次の8行ブロック＝次ページへ折り返す。
+ * 既に同名タブがあれば削除してから作り直すため、再実行しても古い内容が残らない。
  */
-function writeLabelSheet_(ss, entries) {
-  var sheet = ss.getSheetByName(LABEL_SHEET_NAME);
-  if (sheet) {
-    sheet.clear();
-  } else {
-    sheet = ss.insertSheet(LABEL_SHEET_NAME);
+function writeLabelSheetForCase_(labelSs, caseName, entries) {
+  var existing = labelSs.getSheetByName(caseName);
+  if (existing) {
+    labelSs.deleteSheet(existing);
   }
+  var sheet = labelSs.insertSheet(caseName);
 
   var entriesPerColumn = Math.floor(LABEL_ROWS / LABEL_COPIES_PER_ENTRY);
   var entriesPerPage = entriesPerColumn * LABEL_COLS;
@@ -275,7 +342,7 @@ function writeLabelSheet_(ss, entries) {
 
   var grid = [];
   for (var i = 0; i < totalPages * LABEL_ROWS; i++) {
-    grid.push(new Array(LABEL_COLS).fill(''));
+    grid.push(new Array(LABEL_COLS).fill(null));
   }
 
   var index = 0;
@@ -286,28 +353,48 @@ function writeLabelSheet_(ss, entries) {
           break;
         }
         var entry = entries[index++];
-        var text = formatLabelText_(entry);
+        var richText = buildLabelRichText_(entry);
         var row0 = page * LABEL_ROWS + slot * LABEL_COPIES_PER_ENTRY;
         for (var copy = 0; copy < LABEL_COPIES_PER_ENTRY; copy++) {
-          grid[row0 + copy][col] = text;
+          grid[row0 + copy][col] = richText;
         }
       }
     }
   }
 
-  sheet.getRange(1, 1, grid.length, LABEL_COLS).setValues(grid);
-
-  for (var c = 1; c <= LABEL_COLS; c++) {
-    sheet.setColumnWidth(c, Math.round(LABEL_COL_WIDTH_MM * MM_TO_PX));
+  for (var r = 0; r < grid.length; r++) {
+    for (var c = 0; c < LABEL_COLS; c++) {
+      if (grid[r][c]) {
+        sheet.getRange(r + 1, c + 1).setRichTextValue(grid[r][c]);
+      }
+    }
   }
-  for (var r = 1; r <= grid.length; r++) {
-    sheet.setRowHeight(r, Math.round(LABEL_ROW_HEIGHT_MM * MM_TO_PX));
+
+  for (var col1 = 1; col1 <= LABEL_COLS; col1++) {
+    sheet.setColumnWidth(col1, Math.round(LABEL_COL_WIDTH_MM * MM_TO_PX));
+  }
+  for (var row1 = 1; row1 <= grid.length; row1++) {
+    sheet.setRowHeight(row1, Math.round(LABEL_ROW_HEIGHT_MM * MM_TO_PX));
   }
 
+  // setRichTextValue後に setFontSize を呼ぶと行ごとのフォントサイズ指定が
+  // 上書きされてしまうため、ここでは折り返し方式と垂直方向の配置のみ設定する
   sheet.getRange(1, 1, grid.length, LABEL_COLS)
-    .setFontSize(LABEL_FONT_SIZE)
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP)
     .setVerticalAlignment('middle');
+}
+
+/**
+ * ラベルの3行テキストのうち、3行目（数量）だけ太字・大きめフォントにしたリッチテキストを作る。
+ */
+function buildLabelRichText_(entry) {
+  var text = formatLabelText_(entry);
+  var qtyStart = text.lastIndexOf('\n') + 1;
+  return SpreadsheetApp.newRichTextValue()
+    .setText(text)
+    .setTextStyle(0, qtyStart, SpreadsheetApp.newTextStyle().setFontSize(LABEL_FONT_SIZE).build())
+    .setTextStyle(qtyStart, text.length, SpreadsheetApp.newTextStyle().setFontSize(LABEL_QTY_FONT_SIZE).setBold(true).build())
+    .build();
 }
 
 function stripRedundantDatePrefix_(fileName, dateStr) {
@@ -555,7 +642,8 @@ function getOrCreateConfigSheet_(ss) {
   sheet.getRange('A2').setValue('読み込むタブ名');
   sheet.getRange('A3').setValue('起点日付');
   sheet.getRange('A4').setValue('読み込み日数（1〜' + MAX_DAYS_TO_READ + '、空欄で' + DEFAULT_DAYS_TO_READ + '日）');
-  sheet.getRange('A1:A4').setFontWeight('bold');
+  sheet.getRange('A5').setValue('ラベル出力先スプレッドシートID（自動設定・空欄でOK）');
+  sheet.getRange('A1:A5').setFontWeight('bold');
 
   SpreadsheetApp.getUi().alert(
     '「' + CONFIG_SHEET_NAME + '」シートを作成しました。' +
