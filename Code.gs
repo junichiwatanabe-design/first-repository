@@ -1,7 +1,8 @@
 /**
- * 特定フォルダ内の複数スプレッドシートファイルから、
+ * 特定フォルダ内の複数スプレッドシートファイル（案件ごと）から、
  * ファイル名に含まれる日付（例: 2026.7.13）をもとに
- * 起点日付から5日分のデータを抽出し、日付ごとのタブに集約する。
+ * 起点日付から5日分の案件を抽出し、案件ごとに別タブへ出力する。
+ * （印刷時に案件単位で改ページされるよう、1案件＝1タブの構成にしている）
  */
 
 var CONFIG_SHEET_NAME = '設定';
@@ -9,6 +10,9 @@ var CONFIG_FOLDER_CELL = 'B1';
 var CONFIG_TAB_NAME_CELL = 'B2';
 var CONFIG_START_DATE_CELL = 'B3';
 var DAYS_TO_READ = 5;
+var HIGHLIGHT_FONT_SIZE = 20;
+var HEADER_BACKGROUND = '#f3f3f3';
+var CHECKED_BACKGROUND = '#f4c7c3';
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -66,13 +70,14 @@ function importFiveDaysData() {
       return f.name.indexOf(dateStr) !== -1;
     });
 
+    deleteSheetsForDate_(ss, dateStr);
+
     if (matchedFiles.length === 0) {
       summaryLines.push(dateStr + ': 該当ファイルなし');
       continue;
     }
 
-    var aggregatedRows = [];
-    var blocks = [];
+    var createdTabNames = [];
     var warnings = [];
     matchedFiles.forEach(function (f) {
       var sourceSheet;
@@ -87,32 +92,22 @@ function importFiveDaysData() {
         return;
       }
       var values = sourceSheet.getDataRange().getValues();
-      if (values.length > 0) {
-        blocks.push({ startIndex: aggregatedRows.length, rowCount: values.length });
-        aggregatedRows = aggregatedRows.concat(values);
+      if (values.length === 0) {
+        warnings.push(f.name + ': データがありません');
+        return;
       }
+
+      var companyName = findAdjacentValue_(values, '企業名');
+      var baseName = sanitizeSheetName_(dateStr + ' ' + (companyName || f.name));
+      var newSheetName = uniqueSheetName_(ss, baseName);
+      var newSheet = ss.insertSheet(newSheetName);
+      newSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
+      applyCaseFormatting_(newSheet, values);
+      createdTabNames.push(newSheetName);
     });
 
-    var outputSheet = getOrClearSheet_(ss, dateStr);
-    if (aggregatedRows.length > 0) {
-      var maxCols = aggregatedRows.reduce(function (max, row) {
-        return Math.max(max, row.length);
-      }, 0);
-      var paddedRows = aggregatedRows.map(function (row) {
-        if (row.length === maxCols) {
-          return row;
-        }
-        return row.concat(new Array(maxCols - row.length).fill(''));
-      });
-      var writeRange = outputSheet.getRange(1, 1, paddedRows.length, maxCols);
-      writeRange.setValues(paddedRows);
-      writeRange.setFontSize(10).setFontWeight('normal');
-      blocks.forEach(function (block) {
-        applyHighlightFormatting_(outputSheet, block.startIndex + 1, block.rowCount);
-      });
-    }
-
-    var line = dateStr + ': ' + matchedFiles.length + '件のファイルから' + aggregatedRows.length + '行を書き込みました';
+    var line = dateStr + ': ' + matchedFiles.length + '件のファイルを' +
+      createdTabNames.length + '個のタブに書き込みました（' + createdTabNames.join(' / ') + '）';
     if (warnings.length > 0) {
       line += '（警告: ' + warnings.join(' / ') + '）';
     }
@@ -122,24 +117,141 @@ function importFiveDaysData() {
   ui.alert(summaryLines.join('\n'));
 }
 
-function applyHighlightFormatting_(sheet, blockStartRow, blockRowCount) {
-  var FONT_SIZE = 14;
-  function absRow(relRow) {
-    return blockStartRow + relRow - 1;
+function deleteSheetsForDate_(ss, dateStr) {
+  ss.getSheets().forEach(function (sheet) {
+    if (sheet.getName() === CONFIG_SHEET_NAME) {
+      return;
+    }
+    if (sheet.getName().indexOf(dateStr) !== 0) {
+      return;
+    }
+    if (ss.getSheets().length > 1) {
+      ss.deleteSheet(sheet);
+    }
+  });
+}
+
+function sanitizeSheetName_(name) {
+  var sanitized = String(name).replace(/[\[\]\*\?\/\\:]/g, '_').trim();
+  if (sanitized.length > 100) {
+    sanitized = sanitized.substring(0, 100);
+  }
+  return sanitized || 'シート';
+}
+
+function uniqueSheetName_(ss, baseName) {
+  var name = baseName;
+  var suffix = 2;
+  while (ss.getSheetByName(name)) {
+    name = baseName + ' (' + suffix + ')';
+    suffix++;
+  }
+  return name;
+}
+
+/**
+ * 案件シートのラベル文字列（案件実施日・企業名・メニュー名など）を検索して
+ * 該当セルに書式を適用する。行番号を固定値で持たずラベル一致で探すことで、
+ * テンプレートの行位置が案件ごとに多少ずれても崩れないようにしている。
+ */
+function applyCaseFormatting_(sheet, values) {
+  highlightLabelValue_(sheet, values, '案件実施日');
+  highlightLabelValue_(sheet, values, '企業名');
+
+  var menuHeader = findMenuTableHeader_(values);
+  if (!menuHeader) {
+    return;
   }
 
-  if (blockRowCount >= 4) {
-    sheet.getRange(absRow(4), 6).setFontSize(FONT_SIZE).setFontWeight('bold'); // F4 案件実施日
+  var headerRow1 = menuHeader.row + 1;
+  var lastCol = values[menuHeader.row].length;
+  sheet.getRange(headerRow1, 1, 1, lastCol).setFontWeight('bold').setBackground(HEADER_BACKGROUND);
+
+  var dataStartRow1 = headerRow1 + 1;
+  var numDataRows = values.length - dataStartRow1 + 1;
+  if (numDataRows <= 0) {
+    return;
   }
-  if (blockRowCount >= 6) {
-    sheet.getRange(absRow(6), 6).setFontSize(FONT_SIZE).setFontWeight('bold'); // F6 時刻
+
+  applyColumnHighlight_(sheet, menuHeader.colsByLabel['メニュー名'], dataStartRow1, numDataRows);
+  applyColumnHighlight_(sheet, menuHeader.colsByLabel['数量'], dataStartRow1, numDataRows);
+
+  sheet.getRange(headerRow1, 1, numDataRows + 1, lastCol)
+    .applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, true, false);
+
+  applyCheckboxHighlight_(sheet, menuHeader.colsByLabel['温製'], dataStartRow1, numDataRows);
+  applyCheckboxHighlight_(sheet, menuHeader.colsByLabel['ベジ'], dataStartRow1, numDataRows);
+}
+
+function highlightLabelValue_(sheet, values, labelText) {
+  var cell = findCellByValue_(values, labelText);
+  if (!cell) {
+    return;
   }
-  if (blockRowCount >= 19) {
-    sheet.getRange(absRow(11), 14, 9, 1).setFontSize(FONT_SIZE).setFontWeight('bold'); // N11:N19 メニュー名
+  sheet.getRange(cell.row + 1, cell.col + 1).setFontWeight('bold');
+  if (cell.col + 1 < values[cell.row].length) {
+    sheet.getRange(cell.row + 1, cell.col + 2).setFontSize(HIGHLIGHT_FONT_SIZE).setFontWeight('bold');
   }
-  if (blockRowCount >= 42) {
-    sheet.getRange(absRow(27), 5, 16, 4).setFontSize(FONT_SIZE).setFontWeight('bold'); // E27:H42 数量
+}
+
+function applyColumnHighlight_(sheet, colIndex, startRow1, numRows) {
+  if (colIndex == null) {
+    return;
   }
+  sheet.getRange(startRow1, colIndex + 1, numRows, 1).setFontSize(HIGHLIGHT_FONT_SIZE).setFontWeight('bold');
+}
+
+function applyCheckboxHighlight_(sheet, colIndex, startRow1, numRows) {
+  if (colIndex == null) {
+    return;
+  }
+  var range = sheet.getRange(startRow1, colIndex + 1, numRows, 1);
+  range.insertCheckboxes();
+  var firstCellA1 = range.getCell(1, 1).getA1Notation();
+  var rule = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=' + firstCellA1 + '=TRUE')
+    .setBackground(CHECKED_BACKGROUND)
+    .setRanges([range])
+    .build();
+  var rules = sheet.getConditionalFormatRules();
+  rules.push(rule);
+  sheet.setConditionalFormatRules(rules);
+}
+
+function findMenuTableHeader_(values) {
+  var headerCell = findCellByValue_(values, 'メニュー名');
+  if (!headerCell) {
+    return null;
+  }
+  var row = values[headerCell.row];
+  var colsByLabel = {};
+  for (var c = 0; c < row.length; c++) {
+    var text = String(row[c]).trim();
+    if (text) {
+      colsByLabel[text] = c;
+    }
+  }
+  return { row: headerCell.row, colsByLabel: colsByLabel };
+}
+
+function findAdjacentValue_(values, labelText) {
+  var cell = findCellByValue_(values, labelText);
+  if (!cell) {
+    return null;
+  }
+  var row = values[cell.row];
+  return cell.col + 1 < row.length ? row[cell.col + 1] : null;
+}
+
+function findCellByValue_(values, targetText) {
+  for (var r = 0; r < values.length; r++) {
+    for (var c = 0; c < values[r].length; c++) {
+      if (String(values[r][c]).trim() === targetText) {
+        return { row: r, col: c };
+      }
+    }
+  }
+  return null;
 }
 
 function collectSpreadsheetFiles_(folder, excludeFileId) {
@@ -186,13 +298,4 @@ function getOrCreateConfigSheet_(ss) {
     ' に値を入力してから再度実行してください。'
   );
   return null;
-}
-
-function getOrClearSheet_(ss, sheetName) {
-  var sheet = ss.getSheetByName(sheetName);
-  if (sheet) {
-    sheet.clearContents();
-    return sheet;
-  }
-  return ss.insertSheet(sheetName);
 }
