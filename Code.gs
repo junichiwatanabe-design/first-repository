@@ -32,10 +32,20 @@ var COLUMN_WIDTHS = {
 };
 var TIME_COLUMN = 14; // N列
 
+var LABEL_SHEET_NAME = 'ラベル印刷';
+var LABEL_COLS = 3;
+var LABEL_ROWS = 8;
+var LABEL_COPIES_PER_ENTRY = 2; // 同一ラベルを縦に2枚配置
+var LABEL_COL_WIDTH_MM = 70;   // A4・24面ラベルの一般的な実寸（商品が異なる場合は要調整）
+var LABEL_ROW_HEIGHT_MM = 33.9;
+var MM_TO_PX = 96 / 25.4;
+var LABEL_FONT_SIZE = 9;
+
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('日次データ取込')
     .addItem('5日分読み込み実行', 'importFiveDaysData')
+    .addItem('印刷用ラベル作成', 'generateMenuLabels')
     .addToUi();
 }
 
@@ -159,6 +169,145 @@ function deleteSheetsForDate_(ss, dateStr) {
       ss.deleteSheet(sheet);
     }
   });
+}
+
+/**
+ * 「設定」シートを除く全案件タブから、日付・企業名・メニュー名・数量を集めて
+ * A4・24面（3列×8行）のラベルシート（1件あたり縦2枚）を作成する。
+ * 案件タブの内容は実行のたびに変わるため、都度シートを走査して集計する。
+ */
+function generateMenuLabels() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var timeZone = ss.getSpreadsheetTimeZone();
+
+  var entries = [];
+  var warnings = [];
+  ss.getSheets().forEach(function (sheet) {
+    var name = sheet.getName();
+    if (name === CONFIG_SHEET_NAME || name === LABEL_SHEET_NAME) {
+      return;
+    }
+    try {
+      entries = entries.concat(collectLabelEntries_(sheet, timeZone));
+    } catch (e) {
+      warnings.push(name + ': 処理中にエラーが発生しました（' + e.message + '）');
+    }
+  });
+
+  if (entries.length === 0) {
+    ui.alert('ラベルに出力できる案件データが見つかりませんでした。' +
+      (warnings.length > 0 ? '\n警告: ' + warnings.join(' / ') : ''));
+    return;
+  }
+
+  writeLabelSheet_(ss, entries);
+
+  var message = entries.length + '件のメニューからラベル' +
+    (entries.length * LABEL_COPIES_PER_ENTRY) + '枚を「' + LABEL_SHEET_NAME + '」シートに作成しました。';
+  if (warnings.length > 0) {
+    message += '\n警告: ' + warnings.join(' / ');
+  }
+  ui.alert(message);
+}
+
+function collectLabelEntries_(sheet, timeZone) {
+  var values = sheet.getDataRange().getValues();
+  if (values.length === 0) {
+    return [];
+  }
+
+  var dateText = formatLabelDate_(findAdjacentValue_(values, '案件実施日'), timeZone);
+  var company = String(findAdjacentValue_(values, '企業名') || '').trim();
+
+  var menuHeader = findMenuTableHeader_(values);
+  if (!menuHeader) {
+    return [];
+  }
+  var menuCol = menuHeader.colsByLabel['メニュー名'];
+  var qtyCol = menuHeader.colsByLabel['数量'];
+  if (menuCol == null || qtyCol == null) {
+    return [];
+  }
+
+  var entries = [];
+  for (var r = menuHeader.row + 1; r < values.length; r++) {
+    var menuName = String(values[r][menuCol] || '').trim();
+    var qty = values[r][qtyCol];
+    if (!menuName || !qty) {
+      continue;
+    }
+    entries.push({ date: dateText, company: company, menu: menuName, qty: qty });
+  }
+  return entries;
+}
+
+function formatLabelDate_(value, timeZone) {
+  if (!value) {
+    return '';
+  }
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    return Utilities.formatDate(value, timeZone, 'M/d');
+  }
+  return String(value).trim();
+}
+
+function formatLabelText_(entry) {
+  var qtyText = entry.qty === '' || entry.qty == null ? '' : entry.qty + '個';
+  return entry.date + '　' + qtyText + '\n' + entry.company + '\n' + entry.menu;
+}
+
+/**
+ * entries を3列×8行のグリッドに配置する。1エントリにつき縦2行（2枚）を使い、
+ * 24枚（12エントリ）ごとに次の8行ブロック＝次ページへ折り返す。
+ */
+function writeLabelSheet_(ss, entries) {
+  var sheet = ss.getSheetByName(LABEL_SHEET_NAME);
+  if (sheet) {
+    sheet.clear();
+  } else {
+    sheet = ss.insertSheet(LABEL_SHEET_NAME);
+  }
+
+  var entriesPerColumn = Math.floor(LABEL_ROWS / LABEL_COPIES_PER_ENTRY);
+  var entriesPerPage = entriesPerColumn * LABEL_COLS;
+  var totalPages = Math.ceil(entries.length / entriesPerPage);
+
+  var grid = [];
+  for (var i = 0; i < totalPages * LABEL_ROWS; i++) {
+    grid.push(new Array(LABEL_COLS).fill(''));
+  }
+
+  var index = 0;
+  for (var page = 0; page < totalPages; page++) {
+    for (var col = 0; col < LABEL_COLS; col++) {
+      for (var slot = 0; slot < entriesPerColumn; slot++) {
+        if (index >= entries.length) {
+          break;
+        }
+        var entry = entries[index++];
+        var text = formatLabelText_(entry);
+        var row0 = page * LABEL_ROWS + slot * LABEL_COPIES_PER_ENTRY;
+        for (var copy = 0; copy < LABEL_COPIES_PER_ENTRY; copy++) {
+          grid[row0 + copy][col] = text;
+        }
+      }
+    }
+  }
+
+  sheet.getRange(1, 1, grid.length, LABEL_COLS).setValues(grid);
+
+  for (var c = 1; c <= LABEL_COLS; c++) {
+    sheet.setColumnWidth(c, Math.round(LABEL_COL_WIDTH_MM * MM_TO_PX));
+  }
+  for (var r = 1; r <= grid.length; r++) {
+    sheet.setRowHeight(r, Math.round(LABEL_ROW_HEIGHT_MM * MM_TO_PX));
+  }
+
+  sheet.getRange(1, 1, grid.length, LABEL_COLS)
+    .setFontSize(LABEL_FONT_SIZE)
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP)
+    .setVerticalAlignment('middle');
 }
 
 function stripRedundantDatePrefix_(fileName, dateStr) {
