@@ -39,10 +39,13 @@ var LABEL_COLS = 3;
 var LABEL_ROWS = 8;
 var LABEL_COPIES_PER_ENTRY = 2; // 同一ラベルを縦に2枚配置
 var LABEL_COL_WIDTH_MM = 70;   // A4・24面ラベルの一般的な実寸（商品が異なる場合は要調整）
-var LABEL_ROW_HEIGHT_MM = 33.9;
 var MM_TO_PX = 96 / 25.4;
 var LABEL_FONT_SIZE = 14;
 var LABEL_QTY_FONT_SIZE = 28; // 数量行は太字・大きめフォントで強調する
+// 1枚のラベル（実寸33.9mm）を3段（日付+企業名／メニュー名／数量）に分ける。
+// セル内改行では数量だけを中央寄せにできないため、行を分けて数量セルだけ中央寄せにする
+var LABEL_SUBROW_HEIGHTS_MM = [9, 10, 14.9];
+var LABEL_SUBROWS = LABEL_SUBROW_HEIGHTS_MM.length;
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -316,17 +319,10 @@ function formatLabelDate_(value, timeZone) {
 }
 
 /**
- * ラベル1件分の3行テキストを組み立てる。
- * 1行目: 日付＋企業名、2行目: メニュー名、3行目: 数量（呼び出し側でリッチテキスト装飾する）
- */
-function formatLabelText_(entry) {
-  var qtyText = entry.qty === '' || entry.qty == null ? '' : String(entry.qty);
-  return entry.date + '　' + entry.company + '\n' + entry.menu + '\n' + qtyText;
-}
-
-/**
- * 1案件分の entries を3列×8行のグリッドに配置し、labelSs内の同名タブへ書き込む。
- * 1エントリにつき縦2行（2枚）を使い、24枚（12エントリ）ごとに次の8行ブロック＝次ページへ折り返す。
+ * 1案件分の entries を3列×8行（1件＝3段のセル）のグリッドに配置し、labelSs内の
+ * 同名タブへ書き込む。1エントリにつき縦2行（2枚）を使い、24枚（12エントリ）ごとに
+ * 次の8行ブロック＝次ページへ折り返す。数量だけをセル単位で中央寄せにするため、
+ * セル内改行の1セルではなく「日付＋企業名／メニュー名／数量」を別々のセル（3段）に分けている。
  * 既に同名タブがあれば削除してから作り直すため、再実行しても古い内容が残らない。
  */
 function writeLabelSheetForCase_(labelSs, caseName, entries) {
@@ -339,11 +335,7 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
   var entriesPerColumn = Math.floor(LABEL_ROWS / LABEL_COPIES_PER_ENTRY);
   var entriesPerPage = entriesPerColumn * LABEL_COLS;
   var totalPages = Math.ceil(entries.length / entriesPerPage);
-
-  var grid = [];
-  for (var i = 0; i < totalPages * LABEL_ROWS; i++) {
-    grid.push(new Array(LABEL_COLS).fill(null));
-  }
+  var totalRows = totalPages * LABEL_ROWS * LABEL_SUBROWS;
 
   var index = 0;
   for (var page = 0; page < totalPages; page++) {
@@ -353,19 +345,11 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
           break;
         }
         var entry = entries[index++];
-        var richText = buildLabelRichText_(entry);
-        var row0 = page * LABEL_ROWS + slot * LABEL_COPIES_PER_ENTRY;
         for (var copy = 0; copy < LABEL_COPIES_PER_ENTRY; copy++) {
-          grid[row0 + copy][col] = richText;
+          var physicalSlot = slot * LABEL_COPIES_PER_ENTRY + copy;
+          var rowBase = page * LABEL_ROWS * LABEL_SUBROWS + physicalSlot * LABEL_SUBROWS;
+          writeLabelCellGroup_(sheet, rowBase, col + 1, entry);
         }
-      }
-    }
-  }
-
-  for (var r = 0; r < grid.length; r++) {
-    for (var c = 0; c < LABEL_COLS; c++) {
-      if (grid[r][c]) {
-        sheet.getRange(r + 1, c + 1).setRichTextValue(grid[r][c]);
       }
     }
   }
@@ -373,28 +357,34 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
   for (var col1 = 1; col1 <= LABEL_COLS; col1++) {
     sheet.setColumnWidth(col1, Math.round(LABEL_COL_WIDTH_MM * MM_TO_PX));
   }
-  for (var row1 = 1; row1 <= grid.length; row1++) {
-    sheet.setRowHeight(row1, Math.round(LABEL_ROW_HEIGHT_MM * MM_TO_PX));
+  for (var r = 0; r < totalRows; r++) {
+    var subIndex = r % LABEL_SUBROWS;
+    sheet.setRowHeight(r + 1, Math.round(LABEL_SUBROW_HEIGHTS_MM[subIndex] * MM_TO_PX));
   }
-
-  // setRichTextValue後に setFontSize を呼ぶと行ごとのフォントサイズ指定が
-  // 上書きされてしまうため、ここでは折り返し方式と垂直方向の配置のみ設定する
-  sheet.getRange(1, 1, grid.length, LABEL_COLS)
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP)
-    .setVerticalAlignment('middle');
 }
 
 /**
- * ラベルの3行テキストのうち、3行目（数量）だけ太字・大きめフォントにしたリッチテキストを作る。
+ * ラベル1件分（3段）を書き込む。1段目: 日付＋企業名（左寄せ）、
+ * 2段目: メニュー名（左寄せ・はみ出しは後ろが切れる）、3段目: 数量（中央寄せ・太字・大きめフォント）。
  */
-function buildLabelRichText_(entry) {
-  var text = formatLabelText_(entry);
-  var qtyStart = text.lastIndexOf('\n') + 1;
-  return SpreadsheetApp.newRichTextValue()
-    .setText(text)
-    .setTextStyle(0, qtyStart, SpreadsheetApp.newTextStyle().setFontSize(LABEL_FONT_SIZE).build())
-    .setTextStyle(qtyStart, text.length, SpreadsheetApp.newTextStyle().setFontSize(LABEL_QTY_FONT_SIZE).setBold(true).build())
-    .build();
+function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
+  sheet.getRange(rowBase + 1, col1).setValue(entry.date + '　' + entry.company)
+    .setFontSize(LABEL_FONT_SIZE)
+    .setHorizontalAlignment('left')
+    .setVerticalAlignment('bottom')
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+
+  sheet.getRange(rowBase + 2, col1).setValue(entry.menu)
+    .setFontSize(LABEL_FONT_SIZE)
+    .setHorizontalAlignment('left')
+    .setVerticalAlignment('middle')
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+
+  sheet.getRange(rowBase + 3, col1).setValue(entry.qty)
+    .setFontSize(LABEL_QTY_FONT_SIZE)
+    .setFontWeight('bold')
+    .setHorizontalAlignment('center')
+    .setVerticalAlignment('middle');
 }
 
 function stripRedundantDatePrefix_(fileName, dateStr) {
