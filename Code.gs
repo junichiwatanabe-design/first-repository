@@ -41,8 +41,8 @@ var LABEL_COPIES_PER_ENTRY = 2; // 同一ラベルを縦に2枚配置
 var LABEL_COL_WIDTH_MM = 70;   // A4・24面ラベルの一般的な実寸（商品が異なる場合は要調整）
 var LABEL_ROW_HEIGHT_MM = 33.9;
 var MM_TO_PX = 96 / 25.4;
-var LABEL_FONT_SIZE = 9;
-var LABEL_QTY_FONT_SIZE = 16; // 数量行は太字・大きめフォントで強調する
+var LABEL_FONT_SIZE = 14;
+var LABEL_QTY_FONT_SIZE = 28; // 数量行は太字・大きめフォントで強調する
 
 function onOpen() {
   SpreadsheetApp.getUi()
