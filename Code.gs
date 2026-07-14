@@ -87,31 +87,30 @@ function importFiveDaysData() {
     var createdTabNames = [];
     var warnings = [];
     matchedFiles.forEach(function (f) {
-      var sourceSheet;
       try {
-        sourceSheet = SpreadsheetApp.openById(f.id).getSheetByName(tabName);
-      } catch (e) {
-        warnings.push(f.name + ': 開けませんでした');
-        return;
-      }
-      if (!sourceSheet) {
-        warnings.push(f.name + ': タブ「' + tabName + '」が見つかりません');
-        return;
-      }
-      var values = sourceSheet.getDataRange().getValues();
-      if (values.length === 0) {
-        warnings.push(f.name + ': データがありません');
-        return;
-      }
+        var sourceSheet = SpreadsheetApp.openById(f.id).getSheetByName(tabName);
+        if (!sourceSheet) {
+          warnings.push(f.name + ': タブ「' + tabName + '」が見つかりません');
+          return;
+        }
+        var values = sourceSheet.getDataRange().getValues();
+        if (values.length === 0) {
+          warnings.push(f.name + ': データがありません');
+          return;
+        }
 
-      var companyName = findAdjacentValue_(values, '企業名');
-      var baseName = sanitizeSheetName_(dateStr + ' ' + (companyName || f.name));
-      var newSheetName = uniqueSheetName_(ss, baseName);
-      var newSheet = ss.insertSheet(newSheetName);
-      newSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
-      applyCaseFormatting_(newSheet, values);
-      applySheetLayout_(newSheet);
-      createdTabNames.push(newSheetName);
+        var companyName = findAdjacentValue_(values, '企業名');
+        var displayName = companyName || stripRedundantDatePrefix_(f.name, dateStr);
+        var baseName = sanitizeSheetName_(dateStr + ' ' + displayName);
+        var newSheetName = uniqueSheetName_(ss, baseName);
+        var newSheet = ss.insertSheet(newSheetName);
+        newSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
+        applyCaseFormatting_(newSheet, values);
+        applySheetLayout_(newSheet);
+        createdTabNames.push(newSheetName);
+      } catch (e) {
+        warnings.push(f.name + ': 処理中にエラーが発生しました（' + e.message + '）');
+      }
     });
 
     var line = dateStr + ': ' + matchedFiles.length + '件のファイルを' +
@@ -137,6 +136,12 @@ function deleteSheetsForDate_(ss, dateStr) {
       ss.deleteSheet(sheet);
     }
   });
+}
+
+function stripRedundantDatePrefix_(fileName, dateStr) {
+  var cleaned = fileName.split(dateStr).join('').trim();
+  cleaned = cleaned.replace(/^[【\[]\s*/, '').replace(/[】\]]\s*/, ' ').trim();
+  return cleaned || fileName;
 }
 
 function sanitizeSheetName_(name) {
