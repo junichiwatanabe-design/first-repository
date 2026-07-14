@@ -9,7 +9,9 @@ var CONFIG_SHEET_NAME = '設定';
 var CONFIG_FOLDER_CELL = 'B1';
 var CONFIG_TAB_NAME_CELL = 'B2';
 var CONFIG_START_DATE_CELL = 'B3';
-var DAYS_TO_READ = 5;
+var CONFIG_DAYS_CELL = 'B4';
+var DEFAULT_DAYS_TO_READ = 5;
+var MAX_DAYS_TO_READ = 5;
 var BASE_FONT_SIZE = 14;
 var SECONDARY_FONT_SIZE = 16;
 var HIGHLIGHT_FONT_SIZE = 20;
@@ -64,6 +66,18 @@ function importFiveDaysData() {
     return;
   }
 
+  var daysValue = configSheet.getRange(CONFIG_DAYS_CELL).getValue();
+  var daysToRead = DEFAULT_DAYS_TO_READ;
+  if (daysValue !== '' && daysValue !== null) {
+    daysToRead = Number(daysValue);
+    if (!Number.isInteger(daysToRead) || daysToRead < 1 || daysToRead > MAX_DAYS_TO_READ) {
+      ui.alert(
+        '「' + CONFIG_DAYS_CELL + '」(読み込み日数) は1〜' + MAX_DAYS_TO_READ + 'の整数で入力してください。'
+      );
+      return;
+    }
+  }
+
   var folderId = extractFolderId_(folderInput);
   var folder;
   try {
@@ -77,7 +91,7 @@ function importFiveDaysData() {
   var allFiles = collectSpreadsheetFiles_(folder, ss.getId());
 
   var summaryLines = [];
-  for (var i = 0; i < DAYS_TO_READ; i++) {
+  for (var i = 0; i < daysToRead; i++) {
     var targetDate = new Date(startDate.getTime());
     targetDate.setDate(targetDate.getDate() + i);
     var dateStr = formatDateForMatch_(targetDate, timeZone);
@@ -391,7 +405,8 @@ function getOrCreateConfigSheet_(ss) {
   sheet.getRange('A1').setValue('対象フォルダURL/ID');
   sheet.getRange('A2').setValue('読み込むタブ名');
   sheet.getRange('A3').setValue('起点日付');
-  sheet.getRange('A1:A3').setFontWeight('bold');
+  sheet.getRange('A4').setValue('読み込み日数（1〜' + MAX_DAYS_TO_READ + '、空欄で' + DEFAULT_DAYS_TO_READ + '日）');
+  sheet.getRange('A1:A4').setFontWeight('bold');
 
   SpreadsheetApp.getUi().alert(
     '「' + CONFIG_SHEET_NAME + '」シートを作成しました。' +
