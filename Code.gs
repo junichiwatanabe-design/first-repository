@@ -370,12 +370,14 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
 function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
   sheet.getRange(rowBase + 1, col1).setValue(entry.date + '　' + entry.company)
     .setFontSize(LABEL_FONT_SIZE)
+    .setFontWeight('bold')
     .setHorizontalAlignment('left')
     .setVerticalAlignment('bottom')
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
 
   sheet.getRange(rowBase + 2, col1).setValue(entry.menu)
     .setFontSize(LABEL_FONT_SIZE)
+    .setFontWeight('bold')
     .setHorizontalAlignment('left')
     .setVerticalAlignment('middle')
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
