@@ -10,9 +10,16 @@ var CONFIG_FOLDER_CELL = 'B1';
 var CONFIG_TAB_NAME_CELL = 'B2';
 var CONFIG_START_DATE_CELL = 'B3';
 var DAYS_TO_READ = 5;
+var BASE_FONT_SIZE = 14;
+var SECONDARY_FONT_SIZE = 16;
 var HIGHLIGHT_FONT_SIZE = 20;
 var HEADER_BACKGROUND = '#f3f3f3';
 var CHECKED_BACKGROUND = '#f4c7c3';
+var MENU_NAME_COLUMN_SPAN = 3; // メニュー名セルをE:G相当の3列分に横結合する
+var HIDDEN_COLUMNS = [1, 4, 10]; // A, D, J
+var NARROW_COLUMNS = { 2: 30, 3: 30 }; // B, C = 30px
+var WIDE_COLUMNS = { 6: 500 }; // F = 500px
+var TIME_COLUMN = 14; // N列
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -103,6 +110,7 @@ function importFiveDaysData() {
       var newSheet = ss.insertSheet(newSheetName);
       newSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
       applyCaseFormatting_(newSheet, values);
+      applySheetLayout_(newSheet);
       createdTabNames.push(newSheetName);
     });
 
@@ -155,8 +163,15 @@ function uniqueSheetName_(ss, baseName) {
  * テンプレートの行位置が案件ごとに多少ずれても崩れないようにしている。
  */
 function applyCaseFormatting_(sheet, values) {
-  highlightLabelValue_(sheet, values, '案件実施日');
-  highlightLabelValue_(sheet, values, '企業名');
+  var lastRow = values.length;
+  var lastColAll = values[0].length;
+  sheet.getRange(1, 1, lastRow, lastColAll).setFontSize(BASE_FONT_SIZE);
+
+  highlightLabelValue_(sheet, values, '案件実施日', HIGHLIGHT_FONT_SIZE);
+  highlightLabelValue_(sheet, values, '企業名', HIGHLIGHT_FONT_SIZE);
+  highlightLabelValue_(sheet, values, '参加人数', SECONDARY_FONT_SIZE);
+  highlightLabelValue_(sheet, values, 'パーティー目的', SECONDARY_FONT_SIZE);
+  highlightLabelValue_(sheet, values, 'プランナー', SECONDARY_FONT_SIZE);
 
   var menuHeader = findMenuTableHeader_(values);
   if (!menuHeader) {
@@ -173,32 +188,51 @@ function applyCaseFormatting_(sheet, values) {
     return;
   }
 
-  applyColumnHighlight_(sheet, menuHeader.colsByLabel['メニュー名'], dataStartRow1, numDataRows);
-  applyColumnHighlight_(sheet, menuHeader.colsByLabel['数量'], dataStartRow1, numDataRows);
+  var menuCol = menuHeader.colsByLabel['メニュー名'];
+  applyColumnHighlight_(sheet, menuCol, dataStartRow1, numDataRows, MENU_NAME_COLUMN_SPAN);
+  applyColumnHighlight_(sheet, menuHeader.colsByLabel['数量'], dataStartRow1, numDataRows, 1);
 
   sheet.getRange(headerRow1, 1, numDataRows + 1, lastCol)
     .applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, true, false);
 
   applyCheckboxHighlight_(sheet, menuHeader.colsByLabel['温製'], dataStartRow1, numDataRows);
   applyCheckboxHighlight_(sheet, menuHeader.colsByLabel['ベジ'], dataStartRow1, numDataRows);
+
+  if (menuCol != null) {
+    sheet.getRange(headerRow1, menuCol + 1, 1, MENU_NAME_COLUMN_SPAN).merge();
+    sheet.getRange(dataStartRow1, menuCol + 1, numDataRows, MENU_NAME_COLUMN_SPAN).mergeAcross();
+  }
 }
 
-function highlightLabelValue_(sheet, values, labelText) {
+function applySheetLayout_(sheet) {
+  HIDDEN_COLUMNS.forEach(function (col) {
+    sheet.hideColumns(col);
+  });
+  Object.keys(NARROW_COLUMNS).forEach(function (col) {
+    sheet.setColumnWidth(Number(col), NARROW_COLUMNS[col]);
+  });
+  Object.keys(WIDE_COLUMNS).forEach(function (col) {
+    sheet.setColumnWidth(Number(col), WIDE_COLUMNS[col]);
+  });
+  sheet.getRange(1, TIME_COLUMN, sheet.getMaxRows(), 1).setNumberFormat('H:mm');
+}
+
+function highlightLabelValue_(sheet, values, labelText, fontSize) {
   var cell = findCellByValue_(values, labelText);
   if (!cell) {
     return;
   }
   sheet.getRange(cell.row + 1, cell.col + 1).setFontWeight('bold');
   if (cell.col + 1 < values[cell.row].length) {
-    sheet.getRange(cell.row + 1, cell.col + 2).setFontSize(HIGHLIGHT_FONT_SIZE).setFontWeight('bold');
+    sheet.getRange(cell.row + 1, cell.col + 2).setFontSize(fontSize).setFontWeight('bold');
   }
 }
 
-function applyColumnHighlight_(sheet, colIndex, startRow1, numRows) {
+function applyColumnHighlight_(sheet, colIndex, startRow1, numRows, span) {
   if (colIndex == null) {
     return;
   }
-  sheet.getRange(startRow1, colIndex + 1, numRows, 1).setFontSize(HIGHLIGHT_FONT_SIZE).setFontWeight('bold');
+  sheet.getRange(startRow1, colIndex + 1, numRows, span).setFontSize(HIGHLIGHT_FONT_SIZE).setFontWeight('bold');
 }
 
 function applyCheckboxHighlight_(sheet, colIndex, startRow1, numRows) {
