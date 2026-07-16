@@ -298,22 +298,28 @@ function formatLabelDate_(value, timeZone) {
     return '';
   }
   if (Object.prototype.toString.call(value) === '[object Date]') {
-    return Utilities.formatDate(value, timeZone, 'MM/dd');
+    return Utilities.formatDate(value, timeZone, 'M/d');
   }
-  return padDateParts_(String(value).trim());
+  return normalizeDateText_(String(value).trim());
 }
 
 /**
- * 「7/16」のような月/日の文字列を「07/16」のようにゼロ埋め2桁へ変換する。
- * 月/日の形式でない場合はそのまま返す。
+ * 「7/16」「2026.7.16」「2026/7/17」など表記が揺れた月日の文字列を、
+ * ゼロ埋めなし・年なしの「7/16」形式に統一する。区切り文字（`.`または`/`）で
+ * 分割した末尾2つを月・日とみなす（先頭に年が付いていても無視される）。
+ * 月日の形式として解釈できない場合は元の文字列をそのまま返す。
  */
-function padDateParts_(text) {
-  var parts = text.split('/');
-  if (parts.length !== 2 || isNaN(Number(parts[0])) || isNaN(Number(parts[1]))) {
+function normalizeDateText_(text) {
+  var parts = text.split(/[./]/).filter(function (p) { return p !== ''; });
+  if (parts.length < 2) {
     return text;
   }
-  var pad2 = function (n) { return ('0' + n).slice(-2); };
-  return pad2(parts[0]) + '/' + pad2(parts[1]);
+  var month = Number(parts[parts.length - 2]);
+  var day = Number(parts[parts.length - 1]);
+  if (isNaN(month) || isNaN(day)) {
+    return text;
+  }
+  return month + '/' + day;
 }
 
 /**
