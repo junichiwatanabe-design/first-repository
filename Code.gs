@@ -24,10 +24,10 @@ var LABEL_COL_WIDTH_MM = 66;   // A-one マルチプリンタ用ラベルシー�
 var MM_TO_PX = 96 / 25.4;
 var LABEL_FONT_SIZE = 14;
 var LABEL_QTY_FONT_SIZE = 28; // 数量行は太字・大きめフォントで強調する
-// 1枚のラベル（実寸33.9mm）を3段（日付+企業名／メニュー名／数量）に分ける。
-// セル内改行では数量だけを中央寄せにできないため、行を分けて数量セルだけ中央寄せにする
-var LABEL_SUBROW_HEIGHTS_MM = [9, 10, 14.9];
-var LABEL_SUBROWS = LABEL_SUBROW_HEIGHTS_MM.length;
+// 1枚のラベル（実寸33.9mm、96dpi換算で128px）を3段（日付+企業名／メニュー名／数量）に分ける。
+// 元は34px/38px/56pxだったが、数量段を6px減らしメニュー名段に6px足した（合計128pxは維持）
+var LABEL_SUBROW_HEIGHTS_PX = [34, 44, 50];
+var LABEL_SUBROWS = LABEL_SUBROW_HEIGHTS_PX.length;
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -344,7 +344,7 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
   }
   for (var r = 0; r < totalRows; r++) {
     var subIndex = r % LABEL_SUBROWS;
-    sheet.setRowHeight(r + 1, Math.round(LABEL_SUBROW_HEIGHTS_MM[subIndex] * MM_TO_PX));
+    sheet.setRowHeight(r + 1, LABEL_SUBROW_HEIGHTS_PX[subIndex]);
   }
 }
 
@@ -356,22 +356,23 @@ function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
   sheet.getRange(rowBase + 1, col1).setValue(entry.date + '　' + entry.company)
     .setFontSize(LABEL_FONT_SIZE)
     .setFontWeight('bold')
-    .setHorizontalAlignment('left')
+    .setHorizontalAlignment('center')
     .setVerticalAlignment('bottom')
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
 
   sheet.getRange(rowBase + 2, col1).setValue(entry.menu)
     .setFontSize(LABEL_FONT_SIZE)
     .setFontWeight('bold')
-    .setHorizontalAlignment('left')
+    .setHorizontalAlignment('center')
     .setVerticalAlignment('middle')
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
 
   sheet.getRange(rowBase + 3, col1).setValue(entry.qty)
     .setFontSize(LABEL_QTY_FONT_SIZE)
     .setFontWeight('bold')
     .setHorizontalAlignment('center')
-    .setVerticalAlignment('middle');
+    .setVerticalAlignment('middle')
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
 }
 
 function stripRedundantDatePrefix_(fileName, dateStr) {
