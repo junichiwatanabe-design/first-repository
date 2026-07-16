@@ -298,9 +298,22 @@ function formatLabelDate_(value, timeZone) {
     return '';
   }
   if (Object.prototype.toString.call(value) === '[object Date]') {
-    return Utilities.formatDate(value, timeZone, 'M/d');
+    return Utilities.formatDate(value, timeZone, 'MM/dd');
   }
-  return String(value).trim();
+  return padDateParts_(String(value).trim());
+}
+
+/**
+ * 「7/16」のような月/日の文字列を「07/16」のようにゼロ埋め2桁へ変換する。
+ * 月/日の形式でない場合はそのまま返す。
+ */
+function padDateParts_(text) {
+  var parts = text.split('/');
+  if (parts.length !== 2 || isNaN(Number(parts[0])) || isNaN(Number(parts[1]))) {
+    return text;
+  }
+  var pad2 = function (n) { return ('0' + n).slice(-2); };
+  return pad2(parts[0]) + '/' + pad2(parts[1]);
 }
 
 /**
@@ -358,7 +371,7 @@ function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
     .setFontWeight('bold')
     .setHorizontalAlignment('center')
     .setVerticalAlignment('bottom')
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
 
   sheet.getRange(rowBase + 2, col1).setValue(entry.menu)
     .setFontSize(LABEL_FONT_SIZE)
