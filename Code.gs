@@ -375,7 +375,7 @@ function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
   sheet.getRange(rowBase + 1, col1).setValue(entry.date + '　' + entry.company)
     .setFontSize(LABEL_FONT_SIZE)
     .setFontWeight('bold')
-    .setHorizontalAlignment('center')
+    .setHorizontalAlignment('left')
     .setVerticalAlignment('bottom')
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
 
