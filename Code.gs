@@ -1,34 +1,52 @@
 /**
  * 特定フォルダ内の複数スプレッドシートファイル（案件ごと）から、
  * ファイル名に含まれる日付（例: 2026.7.13）をもとに
- * 起点日付から5日分の案件を抽出し、案件ごとに別タブへ出力する。
- * （印刷時に案件単位で改ページされるよう、1案件＝1タブの構成にしている）
+ * 起点日付から指定日数分の案件を抽出し、集計用スプレッドシートへ
+ * 案件ごとに別タブとしてコピーする（印刷時に案件単位で改ページされるよう
+ * 1案件＝1タブの構成にしている）。
+ *
+ * さらに、集計済みの案件タブから日付・企業名・メニュー名・数量を集めて、
+ * ラベル専用の別スプレッドシートへ印刷用ラベル（A4・24面）を作成する機能も持つ。
+ *
+ * ファイル構成:
+ *   1. 設定シート関連
+ *   2. 日次データ取込（集計用スプレッドシートへの案件タブ作成）
+ *   3. 印刷用ラベル作成
+ *   4. 共通ヘルパー
  */
 
-var CONFIG_SHEET_NAME = '設定';
-var CONFIG_FOLDER_CELL = 'B1';
-var CONFIG_TAB_NAME_CELL = 'B2';
-var CONFIG_START_DATE_CELL = 'B3';
-var CONFIG_DAYS_CELL = 'B4';
-var CONFIG_LABEL_SS_CELL = 'B5';
-var DEFAULT_DAYS_TO_READ = 5;
-var MAX_DAYS_TO_READ = 5;
-var MENU_CONTENT_FONT_SIZE = 14; // 「メニュー名」「数量」列のデータ行だけ適用するフォントサイズ
+// ============================================================
+// 1. 設定シート関連
+// ============================================================
 
-var LABEL_SHEET_NAME = 'ラベル印刷'; // 旧バージョンが残していた集計用シート名（あれば案件扱いから除外する）
-var LABEL_SPREADSHEET_SUFFIX = '（ラベル印刷）';
-var LABEL_COLS = 3;
-var LABEL_ROWS = 8;
-var LABEL_COPIES_PER_ENTRY = 2; // 同一ラベルを縦に2枚配置
-var LABEL_COL_WIDTH_MM = 66;   // A-one マルチプリンタ用ラベルシール24面（66mm×33.9mm）の実寸
-var MM_TO_PX = 96 / 25.4;
-var LABEL_FONT_SIZE = 14;
-var LABEL_MENU_FONT_SIZE = 12; // メニュー名はLABEL_FONT_SIZEより2pt小さくする
-var LABEL_QTY_FONT_SIZE = 28; // 数量行は太字・大きめフォントで強調する
-// 1枚のラベル（実寸33.9mm、96dpi換算で128px）を3段（日付+企業名／メニュー名／数量）に分ける。
-// 元は34px/38px/56pxだったが、数量段を6px減らしメニュー名段に6px足した（合計128pxは維持）
-var LABEL_SUBROW_HEIGHTS_PX = [34, 44, 50];
-var LABEL_SUBROWS = LABEL_SUBROW_HEIGHTS_PX.length;
+var CONFIG_SHEET_NAME = '設定';
+var CONFIG_FOLDER_CELL = 'B1';       // 対象フォルダの URL/ID
+var CONFIG_TAB_NAME_CELL = 'B2';     // 各ファイル内で読み込む固定タブ名
+var CONFIG_START_DATE_CELL = 'B3';   // 起点日付
+var CONFIG_DAYS_CELL = 'B4';         // 読み込み日数（1〜MAX_DAYS_TO_READ）
+var CONFIG_LABEL_SS_CELL = 'B5';     // ラベル出力先スプレッドシートの URL/ID（自動設定）
+
+function getOrCreateConfigSheet_(ss) {
+  var sheet = ss.getSheetByName(CONFIG_SHEET_NAME);
+  if (sheet) {
+    return sheet;
+  }
+
+  sheet = ss.insertSheet(CONFIG_SHEET_NAME);
+  sheet.getRange('A1').setValue('対象フォルダURL/ID');
+  sheet.getRange('A2').setValue('読み込むタブ名');
+  sheet.getRange('A3').setValue('起点日付');
+  sheet.getRange('A4').setValue('読み込み日数（1〜' + MAX_DAYS_TO_READ + '、空欄で' + DEFAULT_DAYS_TO_READ + '日）');
+  sheet.getRange('A5').setValue('ラベル出力先スプレッドシートID（自動設定・空欄でOK）');
+  sheet.getRange('A1:A5').setFontWeight('bold');
+
+  SpreadsheetApp.getUi().alert(
+    '「' + CONFIG_SHEET_NAME + '」シートを作成しました。' +
+    CONFIG_FOLDER_CELL + '/' + CONFIG_TAB_NAME_CELL + '/' + CONFIG_START_DATE_CELL +
+    ' に値を入力してから再度実行してください。'
+  );
+  return null;
+}
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -38,6 +56,24 @@ function onOpen() {
     .addToUi();
 }
 
+// ============================================================
+// 2. 日次データ取込（集計用スプレッドシートへの案件タブ作成）
+// ============================================================
+
+var DEFAULT_DAYS_TO_READ = 5;
+var MAX_DAYS_TO_READ = 5;
+var CASE_MENU_FONT_SIZE = 14; // 案件タブの「メニュー名」「数量」列のデータ行だけ適用するフォントサイズ
+
+/**
+ * メニュー「日次データ取込」→「5日分読み込み実行」から呼び出されるメイン関数。
+ * 「設定」シートの内容に従い、対象フォルダ内の案件ファイルから起点日付〜指定日数分を
+ * 検出し、各案件を集計用スプレッドシート内の個別タブとしてコピーする。
+ *
+ * 注意: 削除するのは「処理対象の日付範囲に該当するタブ」のみ。起点日付を先の日付に
+ * 進めながら定期実行していく運用の場合、範囲外になった過去日付のタブは自動では
+ * 削除されず集計用スプレッドシートに残り続ける（意図的な仕様。溜まってきたら手動で
+ * 削除する）。
+ */
 function importFiveDaysData() {
   var ui = SpreadsheetApp.getUi();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -125,12 +161,18 @@ function importFiveDaysData() {
         var displayName = companyName || stripRedundantDatePrefix_(f.name, dateStr);
         var baseName = sanitizeSheetName_(dateStr + ' ' + displayName);
         var newSheetName = uniqueSheetName_(ss, baseName);
+
+        // 元シートの書式（フォント・背景色・罫線・セル結合・列幅など）を保つため
+        // getValues()+setValues() ではなく copyTo() でシートごと複製する。
         var newSheet = sourceSheet.copyTo(ss);
         newSheet.setName(newSheetName);
-        // 数式（他シート参照など）がそのままコピーされて #REF! 等のエラーになるのを防ぐため、
-        // コピー前に評価済みの値（values）で上書きし、セルの中身を確定値にする（書式は変えない）
+
+        // ただし copyTo() は数式（他シート参照など）もそのままコピーしてしまい、
+        // 集計先で参照が切れて #REF! 等のエラーになることがある。コピー前に
+        // 評価済みの値（values）で上書きし、セルの中身を確定値にする（書式は変えない）。
         newSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
-        applyMenuContentFontSize_(newSheet, values);
+
+        applyCaseMenuFontSize_(newSheet, values);
         createdTabNames.push(newSheetName);
       } catch (e) {
         warnings.push(f.name + ': 処理中にエラーが発生しました（' + e.message + '）');
@@ -148,6 +190,10 @@ function importFiveDaysData() {
   ui.alert(summaryLines.join('\n'));
 }
 
+/**
+ * 指定日付（`yyyy.M.d`形式のプレフィックス一致）に対応する案件タブを削除する。
+ * 「設定」シートは対象外。処理対象の日付範囲外のタブには一切触れない。
+ */
 function deleteSheetsForDate_(ss, dateStr) {
   ss.getSheets().forEach(function (sheet) {
     if (sheet.getName() === CONFIG_SHEET_NAME) {
@@ -163,10 +209,86 @@ function deleteSheetsForDate_(ss, dateStr) {
 }
 
 /**
+ * 案件タブの「メニュー名」「数量」列のデータ行（見出し行を除く）だけ
+ * フォントサイズを設定する。太字・背景色などは変更しない（それ以外の書式は
+ * 元ファイルのものをそのまま使う）。
+ */
+function applyCaseMenuFontSize_(sheet, values) {
+  var menuHeader = findMenuTableHeader_(values);
+  if (!menuHeader) {
+    return;
+  }
+  var dataStartRow1 = menuHeader.row + 2;
+  var numDataRows = values.length - dataStartRow1 + 1;
+  if (numDataRows <= 0) {
+    return;
+  }
+  setColumnFontSize_(sheet, menuHeader.colsByLabel['メニュー名'], dataStartRow1, numDataRows, CASE_MENU_FONT_SIZE);
+  setColumnFontSize_(sheet, menuHeader.colsByLabel['数量'], dataStartRow1, numDataRows, CASE_MENU_FONT_SIZE);
+}
+
+function setColumnFontSize_(sheet, colIndex, startRow1, numRows, fontSize) {
+  if (colIndex == null) {
+    return;
+  }
+  sheet.getRange(startRow1, colIndex + 1, numRows, 1).setFontSize(fontSize);
+}
+
+function stripRedundantDatePrefix_(fileName, dateStr) {
+  var cleaned = fileName.split(dateStr).join('').trim();
+  cleaned = cleaned.replace(/^[【\[]\s*/, '').replace(/[】\]]\s*/, ' ').trim();
+  return cleaned || fileName;
+}
+
+function sanitizeSheetName_(name) {
+  var sanitized = String(name).replace(/[\[\]\*\?\/\\:]/g, '_').trim();
+  if (sanitized.length > 100) {
+    sanitized = sanitized.substring(0, 100);
+  }
+  return sanitized || 'シート';
+}
+
+function uniqueSheetName_(ss, baseName) {
+  var name = baseName;
+  var suffix = 2;
+  while (ss.getSheetByName(name)) {
+    name = baseName + ' (' + suffix + ')';
+    suffix++;
+  }
+  return name;
+}
+
+// ============================================================
+// 3. 印刷用ラベル作成
+// ============================================================
+
+var LABEL_SHEET_NAME = 'ラベル印刷'; // 旧バージョンが残していた集計用シート名（あれば案件扱いから除外する）
+var LABEL_SPREADSHEET_SUFFIX = '（ラベル印刷）';
+
+// 面付け（A-one マルチプリンタ用ラベルシール24面: 66mm×33.9mm、3列×8行）
+var LABEL_COLS = 3;
+var LABEL_ROWS = 8;
+var LABEL_COPIES_PER_ENTRY = 2; // 同一ラベルを縦に2枚配置
+var LABEL_COL_WIDTH_MM = 66;    // ラベル1枚の実寸幅。商品が異なる場合は要調整
+var MM_TO_PX = 96 / 25.4;
+
+// ラベル1枚（実寸33.9mm、96dpi換算で128px）を3段に分ける。
+// セル内改行では段ごとに異なる書式（数量だけ中央寄せ等）を付けられないため、
+// 「日付＋企業名／メニュー名／数量」を別々のセル（3段）にしている。
+// 内訳は34px/44px/50px（元は34/38/56pxだったが、数量段を6px減らしメニュー名段に
+// 6px足した。合計128pxは変わらないためラベル1枚の実寸33.9mmは維持される）
+var LABEL_SUBROW_HEIGHTS_PX = [34, 44, 50];
+var LABEL_SUBROWS = LABEL_SUBROW_HEIGHTS_PX.length;
+
+var LABEL_FONT_SIZE = 14;      // 1段目（日付＋企業名）のフォントサイズ
+var LABEL_MENU_FONT_SIZE = 12; // 2段目（メニュー名）。1段目より2pt小さい
+var LABEL_QTY_FONT_SIZE = 28;  // 3段目（数量）。太字・大きめフォントで強調する
+
+/**
+ * メニュー「日次データ取込」→「印刷用ラベル作成」から呼び出されるメイン関数。
  * 「設定」シートを除く案件タブごとに、日付・企業名・メニュー名・数量を集めて、
- * ラベル専用スプレッドシート内の同名タブへ A4・24面（3列×8行）のラベル
- * （1件あたり縦2枚）を作成する。案件タブの内容は実行のたびに変わるため、
- * 都度シートを走査して集計する。
+ * ラベル専用スプレッドシート内の同名タブへ印刷用ラベルを作成する。
+ * 案件タブの内容は実行のたびに変わるため、都度シートを走査して集計する。
  */
 function generateMenuLabels() {
   var ui = SpreadsheetApp.getUi();
@@ -219,7 +341,7 @@ function generateMenuLabels() {
 }
 
 /**
- * ラベル専用スプレッドシートを取得する。「設定」シートに保存済みのIDがあれば
+ * ラベル専用スプレッドシートを取得する。「設定」シートに保存済みのURL/IDがあれば
  * それを再利用し、なければ新規作成して同じ親フォルダに置き、IDを保存する。
  */
 function getOrCreateLabelSpreadsheet_(ss, configSheet) {
@@ -263,6 +385,10 @@ function removeStaleLabelSheets_(labelSs, currentCaseNames) {
   });
 }
 
+/**
+ * 案件タブ1枚分から、ラベルに出力するエントリ（日付・企業名・メニュー名・数量）を集める。
+ * メニュー名・数量のどちらかが空の行はスキップする。
+ */
 function collectLabelEntries_(sheet, timeZone) {
   var values = sheet.getDataRange().getValues();
   if (values.length === 0) {
@@ -294,6 +420,9 @@ function collectLabelEntries_(sheet, timeZone) {
   return entries;
 }
 
+/**
+ * 「案件実施日」の値をラベル表示用に整形する（ゼロ埋めなし・年なしの `M/d` 形式）。
+ */
 function formatLabelDate_(value, timeZone) {
   if (!value) {
     return '';
@@ -326,8 +455,7 @@ function normalizeDateText_(text) {
 /**
  * 1案件分の entries を3列×8行（1件＝3段のセル）のグリッドに配置し、labelSs内の
  * 同名タブへ書き込む。1エントリにつき縦2行（2枚）を使い、24枚（12エントリ）ごとに
- * 次の8行ブロック＝次ページへ折り返す。数量だけをセル単位で中央寄せにするため、
- * セル内改行の1セルではなく「日付＋企業名／メニュー名／数量」を別々のセル（3段）に分けている。
+ * 次の8行ブロック＝次ページへ折り返す。
  * 既に同名タブがあれば削除してから作り直すため、再実行しても古い内容が残らない。
  */
 function writeLabelSheetForCase_(labelSs, caseName, entries) {
@@ -377,12 +505,13 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
 }
 
 /**
- * ラベル1件分（3段）を書き込む。1段目: 日付＋企業名（左寄せ）、
- * 2段目: メニュー名（左寄せ・LABEL_FONT_SIZEより2pt小さいフォント）、
- * 3段目: 数量（中央寄せ・太字・大きめフォント）。
+ * ラベル1件分（3段）を書き込む。
+ *   1段目: 日付＋企業名（左寄せ）
+ *   2段目: メニュー名（左寄せ・1段目より2pt小さいフォント。中央寄せだと
+ *          はみ出した際に先頭が見えず分かりにくいため左寄せにしている）
+ *   3段目: 数量（中央寄せ・太字・大きめフォントで強調）
  * 3段とも WrapStrategy.CLIP のため、行の高さは常に固定（データの長さに応じて
- * 自動で広がらない）。はみ出した分は非表示になる。メニュー名は中央寄せだと
- * はみ出した際に先頭が見えず分かりにくいため左寄せにしている。
+ * 自動で広がらない）。はみ出した分は非表示になる。
  */
 function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
   sheet.getRange(rowBase + 1, col1).setValue(entry.date + '　' + entry.company)
@@ -407,55 +536,14 @@ function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
 }
 
-function stripRedundantDatePrefix_(fileName, dateStr) {
-  var cleaned = fileName.split(dateStr).join('').trim();
-  cleaned = cleaned.replace(/^[【\[]\s*/, '').replace(/[】\]]\s*/, ' ').trim();
-  return cleaned || fileName;
-}
-
-function sanitizeSheetName_(name) {
-  var sanitized = String(name).replace(/[\[\]\*\?\/\\:]/g, '_').trim();
-  if (sanitized.length > 100) {
-    sanitized = sanitized.substring(0, 100);
-  }
-  return sanitized || 'シート';
-}
-
-function uniqueSheetName_(ss, baseName) {
-  var name = baseName;
-  var suffix = 2;
-  while (ss.getSheetByName(name)) {
-    name = baseName + ' (' + suffix + ')';
-    suffix++;
-  }
-  return name;
-}
+// ============================================================
+// 4. 共通ヘルパー
+// ============================================================
 
 /**
- * メニュー表の「メニュー名」「数量」列のデータ行（見出し行を除く）だけ
- * フォントサイズを設定する。太字・背景色などは変更しない。
+ * 値の2次元配列からメニュー表のヘッダー行（「メニュー名」を含む行）を探し、
+ * その行にある各列見出しの列インデックスを引けるようにして返す。
  */
-function applyMenuContentFontSize_(sheet, values) {
-  var menuHeader = findMenuTableHeader_(values);
-  if (!menuHeader) {
-    return;
-  }
-  var dataStartRow1 = menuHeader.row + 2;
-  var numDataRows = values.length - dataStartRow1 + 1;
-  if (numDataRows <= 0) {
-    return;
-  }
-  setColumnFontSize_(sheet, menuHeader.colsByLabel['メニュー名'], dataStartRow1, numDataRows);
-  setColumnFontSize_(sheet, menuHeader.colsByLabel['数量'], dataStartRow1, numDataRows);
-}
-
-function setColumnFontSize_(sheet, colIndex, startRow1, numRows) {
-  if (colIndex == null) {
-    return;
-  }
-  sheet.getRange(startRow1, colIndex + 1, numRows, 1).setFontSize(MENU_CONTENT_FONT_SIZE);
-}
-
 function findMenuTableHeader_(values) {
   var headerCell = findCellByValue_(values, 'メニュー名');
   if (!headerCell) {
@@ -472,6 +560,7 @@ function findMenuTableHeader_(values) {
   return { row: headerCell.row, colsByLabel: colsByLabel };
 }
 
+/** ラベル文字列（例:「企業名」）が入ったセルの右隣のセルの値を返す。 */
 function findAdjacentValue_(values, labelText) {
   var cell = findCellByValue_(values, labelText);
   if (!cell) {
@@ -481,6 +570,7 @@ function findAdjacentValue_(values, labelText) {
   return cell.col + 1 < row.length ? row[cell.col + 1] : null;
 }
 
+/** 値の2次元配列から、指定文字列と完全一致するセルの位置（0始まり）を探す。 */
 function findCellByValue_(values, targetText) {
   for (var r = 0; r < values.length; r++) {
     for (var c = 0; c < values[r].length; c++) {
@@ -492,6 +582,7 @@ function findCellByValue_(values, targetText) {
   return null;
 }
 
+/** フォルダ内のGoogleスプレッドシートファイル一覧を返す（集計用スプレッドシート自身は除外）。 */
 function collectSpreadsheetFiles_(folder, excludeFileId) {
   var files = [];
   var iterator = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
@@ -505,6 +596,7 @@ function collectSpreadsheetFiles_(folder, excludeFileId) {
   return files;
 }
 
+/** フォルダのURLまたは素のIDから、フォルダIDを取り出す。 */
 function extractFolderId_(input) {
   var text = String(input).trim();
   var match = text.match(/\/folders\/([a-zA-Z0-9_-]+)/);
@@ -514,6 +606,7 @@ function extractFolderId_(input) {
   return text;
 }
 
+/** スプレッドシートのURLまたは素のIDから、スプレッドシートIDを取り出す。 */
 function extractSpreadsheetId_(input) {
   var text = String(input).trim();
   var match = text.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
@@ -523,28 +616,7 @@ function extractSpreadsheetId_(input) {
   return text;
 }
 
+/** ファイル名とのマッチングに使う日付文字列（`yyyy.M.d`形式）を作る。 */
 function formatDateForMatch_(date, timeZone) {
   return Utilities.formatDate(date, timeZone, 'yyyy.M.d');
-}
-
-function getOrCreateConfigSheet_(ss) {
-  var sheet = ss.getSheetByName(CONFIG_SHEET_NAME);
-  if (sheet) {
-    return sheet;
-  }
-
-  sheet = ss.insertSheet(CONFIG_SHEET_NAME);
-  sheet.getRange('A1').setValue('対象フォルダURL/ID');
-  sheet.getRange('A2').setValue('読み込むタブ名');
-  sheet.getRange('A3').setValue('起点日付');
-  sheet.getRange('A4').setValue('読み込み日数（1〜' + MAX_DAYS_TO_READ + '、空欄で' + DEFAULT_DAYS_TO_READ + '日）');
-  sheet.getRange('A5').setValue('ラベル出力先スプレッドシートID（自動設定・空欄でOK）');
-  sheet.getRange('A1:A5').setFontWeight('bold');
-
-  SpreadsheetApp.getUi().alert(
-    '「' + CONFIG_SHEET_NAME + '」シートを作成しました。' +
-    CONFIG_FOLDER_CELL + '/' + CONFIG_TAB_NAME_CELL + '/' + CONFIG_START_DATE_CELL +
-    ' に値を入力してから再度実行してください。'
-  );
-  return null;
 }
