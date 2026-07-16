@@ -13,8 +13,6 @@ var CONFIG_DAYS_CELL = 'B4';
 var CONFIG_LABEL_SS_CELL = 'B5';
 var DEFAULT_DAYS_TO_READ = 5;
 var MAX_DAYS_TO_READ = 5;
-var SECONDARY_FONT_SIZE = 16;
-var HIGHLIGHT_FONT_SIZE = 20;
 
 var LABEL_SHEET_NAME = 'ラベル印刷'; // 旧バージョンが残していた集計用シート名（あれば案件扱いから除外する）
 var LABEL_SPREADSHEET_SUFFIX = '（ラベル印刷）';
@@ -127,7 +125,6 @@ function importFiveDaysData() {
         var newSheetName = uniqueSheetName_(ss, baseName);
         var newSheet = sourceSheet.copyTo(ss);
         newSheet.setName(newSheetName);
-        applyFontEmphasis_(newSheet, values);
         createdTabNames.push(newSheetName);
       } catch (e) {
         warnings.push(f.name + ': 処理中にエラーが発生しました（' + e.message + '）');
@@ -393,50 +390,6 @@ function uniqueSheetName_(ss, baseName) {
     suffix++;
   }
   return name;
-}
-
-/**
- * 案件シートのラベル文字列（案件実施日・企業名・メニュー名など）を検索して
- * 該当セルのフォントサイズだけを拡大する。行番号を固定値で持たずラベル一致で
- * 探すことで、テンプレートの行位置が案件ごとに多少ずれても崩れないようにしている。
- * シート自体は元ファイルを copyTo() で複製したもののため、背景色・罫線・列幅・
- * セル結合など元シートが持つ書式はそのまま残る（ここでは上書きしない）。
- */
-function applyFontEmphasis_(sheet, values) {
-  emphasizeLabelValue_(sheet, values, '案件実施日', HIGHLIGHT_FONT_SIZE);
-  emphasizeLabelValue_(sheet, values, '企業名', HIGHLIGHT_FONT_SIZE);
-  emphasizeLabelValue_(sheet, values, '参加人数', SECONDARY_FONT_SIZE);
-  emphasizeLabelValue_(sheet, values, 'パーティー目的', SECONDARY_FONT_SIZE);
-  emphasizeLabelValue_(sheet, values, 'プランナー', SECONDARY_FONT_SIZE);
-
-  var menuHeader = findMenuTableHeader_(values);
-  if (!menuHeader) {
-    return;
-  }
-
-  var dataStartRow1 = menuHeader.row + 2;
-  var numDataRows = values.length - dataStartRow1 + 1;
-  if (numDataRows <= 0) {
-    return;
-  }
-
-  emphasizeColumn_(sheet, menuHeader.colsByLabel['メニュー名'], dataStartRow1, numDataRows);
-  emphasizeColumn_(sheet, menuHeader.colsByLabel['数量'], dataStartRow1, numDataRows);
-}
-
-function emphasizeLabelValue_(sheet, values, labelText, fontSize) {
-  var cell = findCellByValue_(values, labelText);
-  if (!cell || cell.col + 1 >= values[cell.row].length) {
-    return;
-  }
-  sheet.getRange(cell.row + 1, cell.col + 2).setFontSize(fontSize).setFontWeight('bold');
-}
-
-function emphasizeColumn_(sheet, colIndex, startRow1, numRows) {
-  if (colIndex == null) {
-    return;
-  }
-  sheet.getRange(startRow1, colIndex + 1, numRows, 1).setFontSize(HIGHLIGHT_FONT_SIZE).setFontWeight('bold');
 }
 
 function findMenuTableHeader_(values) {
