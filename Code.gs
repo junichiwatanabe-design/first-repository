@@ -342,9 +342,10 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
   var totalRows = totalPages * LABEL_ROWS * LABEL_SUBROWS;
 
   // 最終ページで3列目が1件も埋まらないと、その列が空のままになり印刷範囲が
-  // 2列分に縮んで中央寄せがずれてしまう。先に全セルへ書式だけ触れておくことで
-  // 3列とも印刷範囲に含まれるようにする（値は後段の書き込みで上書きされる）
+  // 2列分に縮んで中央寄せがずれてしまう。先に全セルへ空文字列の値を入れておくことで
+  // 3列とも印刷範囲に含まれるようにする（実データは後段の書き込みで上書きされる）
   sheet.getRange(1, 1, totalRows, LABEL_COLS)
+    .setValue('')
     .setFontSize(LABEL_FONT_SIZE)
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
 
@@ -376,7 +377,9 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
 
 /**
  * ラベル1件分（3段）を書き込む。1段目: 日付＋企業名（左寄せ）、
- * 2段目: メニュー名（左寄せ・はみ出しは後ろが切れる）、3段目: 数量（中央寄せ・太字・大きめフォント）。
+ * 2段目: メニュー名（中央寄せ）、3段目: 数量（中央寄せ・太字・大きめフォント）。
+ * 3段とも WrapStrategy.CLIP のため、行の高さは常に固定（データの長さに応じて
+ * 自動で広がらない）。はみ出した分は非表示になる。
  */
 function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
   sheet.getRange(rowBase + 1, col1).setValue(entry.date + '　' + entry.company)
@@ -391,14 +394,14 @@ function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
     .setFontWeight('bold')
     .setHorizontalAlignment('center')
     .setVerticalAlignment('middle')
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
 
   sheet.getRange(rowBase + 3, col1).setValue(entry.qty)
     .setFontSize(LABEL_QTY_FONT_SIZE)
     .setFontWeight('bold')
     .setHorizontalAlignment('center')
     .setVerticalAlignment('middle')
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
 }
 
 function stripRedundantDatePrefix_(fileName, dateStr) {
