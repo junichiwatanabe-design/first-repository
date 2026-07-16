@@ -222,7 +222,8 @@ function generateMenuLabels() {
  * それを再利用し、なければ新規作成して同じ親フォルダに置き、IDを保存する。
  */
 function getOrCreateLabelSpreadsheet_(ss, configSheet) {
-  var savedId = String(configSheet.getRange(CONFIG_LABEL_SS_CELL).getValue() || '').trim();
+  var savedRaw = configSheet.getRange(CONFIG_LABEL_SS_CELL).getValue();
+  var savedId = savedRaw ? extractSpreadsheetId_(savedRaw) : '';
   if (savedId) {
     try {
       return SpreadsheetApp.openById(savedId);
@@ -474,6 +475,15 @@ function collectSpreadsheetFiles_(folder, excludeFileId) {
 function extractFolderId_(input) {
   var text = String(input).trim();
   var match = text.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (match) {
+    return match[1];
+  }
+  return text;
+}
+
+function extractSpreadsheetId_(input) {
+  var text = String(input).trim();
+  var match = text.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
   if (match) {
     return match[1];
   }
