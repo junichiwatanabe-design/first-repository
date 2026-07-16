@@ -341,6 +341,13 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
   var totalPages = Math.ceil(entries.length / entriesPerPage);
   var totalRows = totalPages * LABEL_ROWS * LABEL_SUBROWS;
 
+  // 最終ページで3列目が1件も埋まらないと、その列が空のままになり印刷範囲が
+  // 2列分に縮んで中央寄せがずれてしまう。先に全セルへ書式だけ触れておくことで
+  // 3列とも印刷範囲に含まれるようにする（値は後段の書き込みで上書きされる）
+  sheet.getRange(1, 1, totalRows, LABEL_COLS)
+    .setFontSize(LABEL_FONT_SIZE)
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+
   var index = 0;
   for (var page = 0; page < totalPages; page++) {
     for (var col = 0; col < LABEL_COLS; col++) {
