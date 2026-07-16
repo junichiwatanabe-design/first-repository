@@ -13,25 +13,8 @@ var CONFIG_DAYS_CELL = 'B4';
 var CONFIG_LABEL_SS_CELL = 'B5';
 var DEFAULT_DAYS_TO_READ = 5;
 var MAX_DAYS_TO_READ = 5;
-var BASE_FONT_SIZE = 14;
 var SECONDARY_FONT_SIZE = 16;
 var HIGHLIGHT_FONT_SIZE = 20;
-var HEADER_BACKGROUND = '#f3f3f3';
-var CHECKED_BACKGROUND = '#f4c7c3';
-var DARK_BACKGROUND = '#434343';
-var WHITE_FONT = '#ffffff';
-var MENU_NAME_COLUMN_SPAN = 3; // メニュー名セルをE:G相当の3列分に横結合する
-var HIDDEN_COLUMNS = [1, 4, 10]; // A, D, J
-var COLUMN_WIDTHS = {
-  2: 30,  // B (温製)
-  3: 30,  // C (ベジ)
-  5: 180, // E
-  6: 480, // F
-  7: 50,  // G
-  9: 200, // I
-  11: 200 // K
-};
-var TIME_COLUMN = 14; // N列
 
 var LABEL_SHEET_NAME = 'ラベル印刷'; // 旧バージョンが残していた集計用シート名（あれば案件扱いから除外する）
 var LABEL_SPREADSHEET_SUFFIX = '（ラベル印刷）';
@@ -142,10 +125,9 @@ function importFiveDaysData() {
         var displayName = companyName || stripRedundantDatePrefix_(f.name, dateStr);
         var baseName = sanitizeSheetName_(dateStr + ' ' + displayName);
         var newSheetName = uniqueSheetName_(ss, baseName);
-        var newSheet = ss.insertSheet(newSheetName);
-        newSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
-        applyCaseFormatting_(newSheet, values);
-        applySheetLayout_(newSheet);
+        var newSheet = sourceSheet.copyTo(ss);
+        newSheet.setName(newSheetName);
+        applyFontEmphasis_(newSheet, values);
         createdTabNames.push(newSheetName);
       } catch (e) {
         warnings.push(f.name + ': 処理中にエラーが発生しました（' + e.message + '）');
@@ -415,150 +397,46 @@ function uniqueSheetName_(ss, baseName) {
 
 /**
  * 案件シートのラベル文字列（案件実施日・企業名・メニュー名など）を検索して
- * 該当セルに書式を適用する。行番号を固定値で持たずラベル一致で探すことで、
- * テンプレートの行位置が案件ごとに多少ずれても崩れないようにしている。
+ * 該当セルのフォントサイズだけを拡大する。行番号を固定値で持たずラベル一致で
+ * 探すことで、テンプレートの行位置が案件ごとに多少ずれても崩れないようにしている。
+ * シート自体は元ファイルを copyTo() で複製したもののため、背景色・罫線・列幅・
+ * セル結合など元シートが持つ書式はそのまま残る（ここでは上書きしない）。
  */
-function applyCaseFormatting_(sheet, values) {
-  var lastRow = values.length;
-  var lastColAll = values[0].length;
-  sheet.getRange(1, 1, lastRow, lastColAll)
-    .setFontSize(BASE_FONT_SIZE)
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
-
-  highlightLabelValue_(sheet, values, '案件実施日', HIGHLIGHT_FONT_SIZE, {
-    background: DARK_BACKGROUND,
-    fontColor: WHITE_FONT,
-    align: 'center',
-    numberFormat: 'M/d',
-    labelBackground: HEADER_BACKGROUND
-  });
-  highlightLabelValue_(sheet, values, '企業名', HIGHLIGHT_FONT_SIZE, {
-    background: DARK_BACKGROUND,
-    fontColor: WHITE_FONT,
-    align: 'center',
-    labelBackground: HEADER_BACKGROUND
-  });
-  highlightLabelValue_(sheet, values, '参加人数', SECONDARY_FONT_SIZE, {
-    labelBackground: HEADER_BACKGROUND
-  });
-  highlightLabelValue_(sheet, values, 'パーティー目的', SECONDARY_FONT_SIZE, {
-    labelBackground: HEADER_BACKGROUND,
-    mergeRight: true
-  });
-  highlightLabelValue_(sheet, values, 'プランナー', SECONDARY_FONT_SIZE, {
-    labelBackground: HEADER_BACKGROUND,
-    mergeRight: true
-  });
+function applyFontEmphasis_(sheet, values) {
+  emphasizeLabelValue_(sheet, values, '案件実施日', HIGHLIGHT_FONT_SIZE);
+  emphasizeLabelValue_(sheet, values, '企業名', HIGHLIGHT_FONT_SIZE);
+  emphasizeLabelValue_(sheet, values, '参加人数', SECONDARY_FONT_SIZE);
+  emphasizeLabelValue_(sheet, values, 'パーティー目的', SECONDARY_FONT_SIZE);
+  emphasizeLabelValue_(sheet, values, 'プランナー', SECONDARY_FONT_SIZE);
 
   var menuHeader = findMenuTableHeader_(values);
   if (!menuHeader) {
     return;
   }
 
-  var timeCell = findCellByValue_(values, '時刻');
-  if (timeCell && menuHeader.row > timeCell.row) {
-    var timeSectionRows = menuHeader.row - timeCell.row; // 時刻見出し行を含む行数
-    sheet.getRange(timeCell.row + 1, timeCell.col + 1, timeSectionRows, 1)
-      .setHorizontalAlignment('center');
-    var itemCol = timeCell.col + 1; // 「項目」列（時刻の右隣）
-    sheet.getRange(timeCell.row + 1, itemCol + 1, timeSectionRows, 2).mergeAcross();
-    sheet.getRange(timeCell.row + 1, timeCell.col + 1).setBackground(HEADER_BACKGROUND); // 時刻見出し
-    sheet.getRange(timeCell.row + 1, itemCol + 1, 1, 2).setBackground(HEADER_BACKGROUND); // 項目見出し
-  }
-
-  var headerRow1 = menuHeader.row + 1;
-  var lastCol = values[menuHeader.row].length;
-  sheet.getRange(headerRow1, 1, 1, lastCol).setFontWeight('bold').setBackground(HEADER_BACKGROUND);
-
-  var dataStartRow1 = headerRow1 + 1;
+  var dataStartRow1 = menuHeader.row + 2;
   var numDataRows = values.length - dataStartRow1 + 1;
   if (numDataRows <= 0) {
     return;
   }
 
-  var menuCol = menuHeader.colsByLabel['メニュー名'];
-  applyColumnHighlight_(sheet, menuCol, dataStartRow1, numDataRows, MENU_NAME_COLUMN_SPAN);
-  applyColumnHighlight_(sheet, menuHeader.colsByLabel['数量'], dataStartRow1, numDataRows, 1);
-
-  sheet.getRange(headerRow1, 1, numDataRows + 1, lastCol)
-    .applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, true, false);
-
-  applyCheckboxHighlight_(sheet, menuHeader.colsByLabel['温製'], dataStartRow1, numDataRows);
-  applyCheckboxHighlight_(sheet, menuHeader.colsByLabel['ベジ'], dataStartRow1, numDataRows);
-
-  if (menuCol != null) {
-    sheet.getRange(headerRow1, menuCol + 1, 1, MENU_NAME_COLUMN_SPAN).merge();
-    sheet.getRange(dataStartRow1, menuCol + 1, numDataRows, MENU_NAME_COLUMN_SPAN).mergeAcross();
-  }
+  emphasizeColumn_(sheet, menuHeader.colsByLabel['メニュー名'], dataStartRow1, numDataRows);
+  emphasizeColumn_(sheet, menuHeader.colsByLabel['数量'], dataStartRow1, numDataRows);
 }
 
-function applySheetLayout_(sheet) {
-  HIDDEN_COLUMNS.forEach(function (col) {
-    sheet.hideColumns(col);
-  });
-  Object.keys(COLUMN_WIDTHS).forEach(function (col) {
-    sheet.setColumnWidth(Number(col), COLUMN_WIDTHS[col]);
-  });
-  sheet.getRange(1, TIME_COLUMN, sheet.getMaxRows(), 1).setNumberFormat('H:mm');
-}
-
-function highlightLabelValue_(sheet, values, labelText, fontSize, opts) {
+function emphasizeLabelValue_(sheet, values, labelText, fontSize) {
   var cell = findCellByValue_(values, labelText);
-  if (!cell) {
+  if (!cell || cell.col + 1 >= values[cell.row].length) {
     return;
   }
-  var labelRange = sheet.getRange(cell.row + 1, cell.col + 1).setFontWeight('bold');
-  if (opts && opts.labelBackground) {
-    labelRange.setBackground(opts.labelBackground);
-  }
-  if (cell.col + 1 < values[cell.row].length) {
-    var valueCols = (opts && opts.mergeRight) ? 2 : 1;
-    var valueRange = sheet.getRange(cell.row + 1, cell.col + 2, 1, valueCols)
-      .setFontSize(fontSize)
-      .setFontWeight('bold');
-    if (opts && opts.background) {
-      valueRange.setBackground(opts.background);
-    }
-    if (opts && opts.fontColor) {
-      valueRange.setFontColor(opts.fontColor);
-    }
-    if (opts && opts.border) {
-      valueRange.setBorder(true, true, true, true, null, null);
-    }
-    if (opts && opts.align) {
-      valueRange.setHorizontalAlignment(opts.align);
-    }
-    if (opts && opts.numberFormat) {
-      valueRange.setNumberFormat(opts.numberFormat);
-    }
-    if (opts && opts.mergeRight) {
-      valueRange.mergeAcross();
-    }
-  }
+  sheet.getRange(cell.row + 1, cell.col + 2).setFontSize(fontSize).setFontWeight('bold');
 }
 
-function applyColumnHighlight_(sheet, colIndex, startRow1, numRows, span) {
+function emphasizeColumn_(sheet, colIndex, startRow1, numRows) {
   if (colIndex == null) {
     return;
   }
-  sheet.getRange(startRow1, colIndex + 1, numRows, span).setFontSize(HIGHLIGHT_FONT_SIZE).setFontWeight('bold');
-}
-
-function applyCheckboxHighlight_(sheet, colIndex, startRow1, numRows) {
-  if (colIndex == null) {
-    return;
-  }
-  var range = sheet.getRange(startRow1, colIndex + 1, numRows, 1);
-  range.insertCheckboxes();
-  var firstCellA1 = range.getCell(1, 1).getA1Notation();
-  var rule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=' + firstCellA1 + '=TRUE')
-    .setBackground(CHECKED_BACKGROUND)
-    .setRanges([range])
-    .build();
-  var rules = sheet.getConditionalFormatRules();
-  rules.push(rule);
-  sheet.setConditionalFormatRules(rules);
+  sheet.getRange(startRow1, colIndex + 1, numRows, 1).setFontSize(HIGHLIGHT_FONT_SIZE).setFontWeight('bold');
 }
 
 function findMenuTableHeader_(values) {
