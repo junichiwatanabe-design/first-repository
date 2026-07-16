@@ -126,6 +126,9 @@ function importFiveDaysData() {
         var newSheetName = uniqueSheetName_(ss, baseName);
         var newSheet = sourceSheet.copyTo(ss);
         newSheet.setName(newSheetName);
+        // 数式（他シート参照など）がそのままコピーされて #REF! 等のエラーになるのを防ぐため、
+        // コピー前に評価済みの値（values）で上書きし、セルの中身を確定値にする（書式は変えない）
+        newSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
         applyMenuContentFontSize_(newSheet, values);
         createdTabNames.push(newSheetName);
       } catch (e) {
