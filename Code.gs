@@ -23,6 +23,7 @@ var LABEL_COPIES_PER_ENTRY = 2; // 同一ラベルを縦に2枚配置
 var LABEL_COL_WIDTH_MM = 66;   // A-one マルチプリンタ用ラベルシール24面（66mm×33.9mm）の実寸
 var MM_TO_PX = 96 / 25.4;
 var LABEL_FONT_SIZE = 14;
+var LABEL_MENU_FONT_SIZE = 12; // メニュー名はLABEL_FONT_SIZEより2pt小さくする
 var LABEL_QTY_FONT_SIZE = 28; // 数量行は太字・大きめフォントで強調する
 // 1枚のラベル（実寸33.9mm、96dpi換算で128px）を3段（日付+企業名／メニュー名／数量）に分ける。
 // 元は34px/38px/56pxだったが、数量段を6px減らしメニュー名段に6px足した（合計128pxは維持）
@@ -377,9 +378,11 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
 
 /**
  * ラベル1件分（3段）を書き込む。1段目: 日付＋企業名（左寄せ）、
- * 2段目: メニュー名（中央寄せ）、3段目: 数量（中央寄せ・太字・大きめフォント）。
+ * 2段目: メニュー名（左寄せ・LABEL_FONT_SIZEより2pt小さいフォント）、
+ * 3段目: 数量（中央寄せ・太字・大きめフォント）。
  * 3段とも WrapStrategy.CLIP のため、行の高さは常に固定（データの長さに応じて
- * 自動で広がらない）。はみ出した分は非表示になる。
+ * 自動で広がらない）。はみ出した分は非表示になる。メニュー名は中央寄せだと
+ * はみ出した際に先頭が見えず分かりにくいため左寄せにしている。
  */
 function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
   sheet.getRange(rowBase + 1, col1).setValue(entry.date + '　' + entry.company)
@@ -390,9 +393,9 @@ function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
 
   sheet.getRange(rowBase + 2, col1).setValue(entry.menu)
-    .setFontSize(LABEL_FONT_SIZE)
+    .setFontSize(LABEL_MENU_FONT_SIZE)
     .setFontWeight('bold')
-    .setHorizontalAlignment('center')
+    .setHorizontalAlignment('left')
     .setVerticalAlignment('middle')
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
 
