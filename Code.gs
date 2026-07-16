@@ -13,6 +13,7 @@ var CONFIG_DAYS_CELL = 'B4';
 var CONFIG_LABEL_SS_CELL = 'B5';
 var DEFAULT_DAYS_TO_READ = 5;
 var MAX_DAYS_TO_READ = 5;
+var MENU_CONTENT_FONT_SIZE = 14; // 「メニュー名」「数量」列のデータ行だけ適用するフォントサイズ
 
 var LABEL_SHEET_NAME = 'ラベル印刷'; // 旧バージョンが残していた集計用シート名（あれば案件扱いから除外する）
 var LABEL_SPREADSHEET_SUFFIX = '（ラベル印刷）';
@@ -125,6 +126,7 @@ function importFiveDaysData() {
         var newSheetName = uniqueSheetName_(ss, baseName);
         var newSheet = sourceSheet.copyTo(ss);
         newSheet.setName(newSheetName);
+        applyMenuContentFontSize_(newSheet, values);
         createdTabNames.push(newSheetName);
       } catch (e) {
         warnings.push(f.name + ': 処理中にエラーが発生しました（' + e.message + '）');
@@ -390,6 +392,31 @@ function uniqueSheetName_(ss, baseName) {
     suffix++;
   }
   return name;
+}
+
+/**
+ * メニュー表の「メニュー名」「数量」列のデータ行（見出し行を除く）だけ
+ * フォントサイズを設定する。太字・背景色などは変更しない。
+ */
+function applyMenuContentFontSize_(sheet, values) {
+  var menuHeader = findMenuTableHeader_(values);
+  if (!menuHeader) {
+    return;
+  }
+  var dataStartRow1 = menuHeader.row + 2;
+  var numDataRows = values.length - dataStartRow1 + 1;
+  if (numDataRows <= 0) {
+    return;
+  }
+  setColumnFontSize_(sheet, menuHeader.colsByLabel['メニュー名'], dataStartRow1, numDataRows);
+  setColumnFontSize_(sheet, menuHeader.colsByLabel['数量'], dataStartRow1, numDataRows);
+}
+
+function setColumnFontSize_(sheet, colIndex, startRow1, numRows) {
+  if (colIndex == null) {
+    return;
+  }
+  sheet.getRange(startRow1, colIndex + 1, numRows, 1).setFontSize(MENU_CONTENT_FONT_SIZE);
 }
 
 function findMenuTableHeader_(values) {
