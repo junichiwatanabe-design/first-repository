@@ -125,6 +125,10 @@ function importFiveDaysData() {
   var timeZone = ss.getSpreadsheetTimeZone();
   var allFiles = collectSpreadsheetFiles_(folder, ss.getId());
 
+  // 実行のたびに前回までの案件タブをすべて削除してから作り直す
+  // （範囲外の古い日付のタブも含めて残さない）
+  deleteAllCaseSheets_(ss);
+
   var summaryLines = [];
   for (var i = 0; i < daysToRead; i++) {
     var targetDate = new Date(startDate.getTime());
@@ -134,8 +138,6 @@ function importFiveDaysData() {
     var matchedFiles = allFiles.filter(function (f) {
       return f.name.indexOf(dateStr) !== -1;
     });
-
-    deleteSheetsForDate_(ss, dateStr);
 
     if (matchedFiles.length === 0) {
       summaryLines.push(dateStr + ': 該当ファイルなし');
@@ -191,15 +193,13 @@ function importFiveDaysData() {
 }
 
 /**
- * 指定日付（`yyyy.M.d`形式のプレフィックス一致）に対応する案件タブを削除する。
- * 「設定」シートは対象外。処理対象の日付範囲外のタブには一切触れない。
+ * 「設定」シートを除く全ての案件タブを削除する。実行のたびに前回までの
+ * 案件タブ（処理対象の日付範囲外だったものも含む）を一掃してから作り直すことで、
+ * タブが際限なく増え続けるのを防ぐ。
  */
-function deleteSheetsForDate_(ss, dateStr) {
+function deleteAllCaseSheets_(ss) {
   ss.getSheets().forEach(function (sheet) {
     if (sheet.getName() === CONFIG_SHEET_NAME) {
-      return;
-    }
-    if (sheet.getName().indexOf(dateStr) !== 0) {
       return;
     }
     if (ss.getSheets().length > 1) {
