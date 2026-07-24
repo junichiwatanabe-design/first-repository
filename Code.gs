@@ -51,8 +51,8 @@ function getOrCreateConfigSheet_(ss) {
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('日次データ取込')
-    .addItem('5日分読み込み実行', 'importFiveDaysData')
-    .addItem('印刷用ラベル作成', 'generateMenuLabels')
+    .addItem('データ読込', 'importData')
+    .addItem('ラベル作成', 'createLabels')
     .addToUi();
 }
 
@@ -65,16 +65,12 @@ var MAX_DAYS_TO_READ = 5;
 var CASE_MENU_FONT_SIZE = 14; // 案件タブの「メニュー名」「数量」列のデータ行だけ適用するフォントサイズ
 
 /**
- * メニュー「日次データ取込」→「5日分読み込み実行」から呼び出されるメイン関数。
+ * メニュー「日次データ取込」→「データ読込」から呼び出されるメイン関数。
  * 「設定」シートの内容に従い、対象フォルダ内の案件ファイルから起点日付〜指定日数分を
  * 検出し、各案件を集計用スプレッドシート内の個別タブとしてコピーする。
- *
- * 注意: 削除するのは「処理対象の日付範囲に該当するタブ」のみ。起点日付を先の日付に
- * 進めながら定期実行していく運用の場合、範囲外になった過去日付のタブは自動では
- * 削除されず集計用スプレッドシートに残り続ける（意図的な仕様。溜まってきたら手動で
- * 削除する）。
+ * 実行のたびに前回までの案件タブは全て削除してから作り直す（deleteAllCaseSheets_）。
  */
-function importFiveDaysData() {
+function importData() {
   var ui = SpreadsheetApp.getUi();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var configSheet = getOrCreateConfigSheet_(ss);
@@ -285,12 +281,12 @@ var LABEL_MENU_FONT_SIZE = 12; // 2段目（メニュー名）。1段目より2p
 var LABEL_QTY_FONT_SIZE = 28;  // 3段目（数量）。太字・大きめフォントで強調する
 
 /**
- * メニュー「日次データ取込」→「印刷用ラベル作成」から呼び出されるメイン関数。
+ * メニュー「日次データ取込」→「ラベル作成」から呼び出されるメイン関数。
  * 「設定」シートを除く案件タブごとに、日付・企業名・メニュー名・数量を集めて、
  * ラベル専用スプレッドシート内の同名タブへ印刷用ラベルを作成する。
  * 案件タブの内容は実行のたびに変わるため、都度シートを走査して集計する。
  */
-function generateMenuLabels() {
+function createLabels() {
   var ui = SpreadsheetApp.getUi();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var configSheet = getOrCreateConfigSheet_(ss);
