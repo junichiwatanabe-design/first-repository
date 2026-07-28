@@ -137,23 +137,23 @@ function importData() {
     });
 
     if (matchedFiles.length === 0) {
-      summaryLines.push(dateStr + ': 該当ファイルなし');
+      summaryLines.push(dateStr + ' : 該当ファイルなし');
       continue;
     }
 
-    var createdTabNames = [];
+    var createdDisplayNames = [];
     matchedFiles.forEach(function (f) {
-      // 警告に表示する名前は「日付 企業名（またはファイル名から日付を除いたもの）」の形にする
+      // 表示する名前は「企業名（またはファイル名から日付・記号を除いたもの）」にする
       var displayName = stripRedundantDatePrefix_(f.name, dateStr);
       try {
         var sourceSheet = SpreadsheetApp.openById(f.id).getSheetByName(tabName);
         if (!sourceSheet) {
-          allWarnings.push(dateStr + ' ' + displayName + ': タブ「' + tabName + '」が見つかりません');
+          allWarnings.push(dateStr + ' ' + displayName + ' : タブ「' + tabName + '」が見つかりません');
           return;
         }
         var values = sourceSheet.getDataRange().getValues();
         if (values.length === 0) {
-          allWarnings.push(dateStr + ' ' + displayName + ': データがありません');
+          allWarnings.push(dateStr + ' ' + displayName + ' : データがありません');
           return;
         }
 
@@ -173,21 +173,20 @@ function importData() {
         newSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
 
         applyCaseMenuFontSize_(newSheet, values);
-        createdTabNames.push(newSheetName);
+        createdDisplayNames.push(displayName);
       } catch (e) {
-        allWarnings.push(dateStr + ' ' + displayName + ': 処理中にエラーが発生しました（' + e.message + '）');
+        allWarnings.push(dateStr + ' ' + displayName + ' : 処理中にエラーが発生しました（' + e.message + '）');
       }
     });
 
-    summaryLines.push(dateStr + ': ' + matchedFiles.length + '件のファイルを' +
-      createdTabNames.length + '個のタブに書き込みました（' + createdTabNames.join(' / ') + '）');
+    summaryLines.push(dateStr + ' : ' + createdDisplayNames.length + '件（' + createdDisplayNames.join(' / ') + '）');
   }
 
   ui.alert('データ読込 結果', summaryLines.join('\n'), ui.ButtonSet.OK);
 
   // 警告・エラーは通常の結果に埋もれて見落とされないよう、別ダイアログで目立たせて表示する
   if (allWarnings.length > 0) {
-    ui.alert('⚠ 警告（要確認）', allWarnings.join('\n'), ui.ButtonSet.OK);
+    ui.alert('⚠️要確認', allWarnings.join('\n'), ui.ButtonSet.OK);
   }
 }
 
@@ -335,7 +334,7 @@ function createLabels() {
 
   // 警告・エラーは通常の結果に埋もれて見落とされないよう、別ダイアログで目立たせて表示する
   if (warnings.length > 0) {
-    ui.alert('⚠ 警告（要確認）', warnings.join('\n'), ui.ButtonSet.OK);
+    ui.alert('⚠️要確認', warnings.join('\n'), ui.ButtonSet.OK);
   }
 }
 
