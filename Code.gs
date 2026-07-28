@@ -126,6 +126,7 @@ function importData() {
   deleteAllCaseSheets_(ss);
 
   var summaryLines = [];
+  var allWarnings = [];
   for (var i = 0; i < daysToRead; i++) {
     var targetDate = new Date(startDate.getTime());
     targetDate.setDate(targetDate.getDate() + i);
@@ -141,22 +142,23 @@ function importData() {
     }
 
     var createdTabNames = [];
-    var warnings = [];
     matchedFiles.forEach(function (f) {
+      // 警告に表示する名前は「日付 企業名（またはファイル名から日付を除いたもの）」の形にする
+      var displayName = stripRedundantDatePrefix_(f.name, dateStr);
       try {
         var sourceSheet = SpreadsheetApp.openById(f.id).getSheetByName(tabName);
         if (!sourceSheet) {
-          warnings.push(f.name + ': タブ「' + tabName + '」が見つかりません');
+          allWarnings.push(dateStr + ' ' + displayName + ': タブ「' + tabName + '」が見つかりません');
           return;
         }
         var values = sourceSheet.getDataRange().getValues();
         if (values.length === 0) {
-          warnings.push(f.name + ': データがありません');
+          allWarnings.push(dateStr + ' ' + displayName + ': データがありません');
           return;
         }
 
         var companyName = findAdjacentValue_(values, '企業名');
-        var displayName = companyName || stripRedundantDatePrefix_(f.name, dateStr);
+        displayName = companyName || displayName;
         var baseName = sanitizeSheetName_(dateStr + ' ' + displayName);
         var newSheetName = uniqueSheetName_(ss, baseName);
 
@@ -173,19 +175,20 @@ function importData() {
         applyCaseMenuFontSize_(newSheet, values);
         createdTabNames.push(newSheetName);
       } catch (e) {
-        warnings.push(f.name + ': 処理中にエラーが発生しました（' + e.message + '）');
+        allWarnings.push(dateStr + ' ' + displayName + ': 処理中にエラーが発生しました（' + e.message + '）');
       }
     });
 
-    var line = dateStr + ': ' + matchedFiles.length + '件のファイルを' +
-      createdTabNames.length + '個のタブに書き込みました（' + createdTabNames.join(' / ') + '）';
-    if (warnings.length > 0) {
-      line += '（警告: ' + warnings.join(' / ') + '）';
-    }
-    summaryLines.push(line);
+    summaryLines.push(dateStr + ': ' + matchedFiles.length + '件のファイルを' +
+      createdTabNames.length + '個のタブに書き込みました（' + createdTabNames.join(' / ') + '）');
   }
 
-  ui.alert(summaryLines.join('\n'));
+  ui.alert('データ読込 結果', summaryLines.join('\n'), ui.ButtonSet.OK);
+
+  // 警告・エラーは通常の結果に埋もれて見落とされないよう、別ダイアログで目立たせて表示する
+  if (allWarnings.length > 0) {
+    ui.alert('⚠ 警告（要確認）', allWarnings.join('\n'), ui.ButtonSet.OK);
+  }
 }
 
 /**
@@ -322,18 +325,18 @@ function createLabels() {
   removeStaleLabelSheets_(labelSs, caseSheetNames);
 
   if (createdCases.length === 0) {
-    ui.alert('ラベルに出力できる案件データが見つかりませんでした。' +
-      (warnings.length > 0 ? '\n警告: ' + warnings.join(' / ') : ''));
-    return;
+    ui.alert('ラベルに出力できる案件データが見つかりませんでした。');
+  } else {
+    var message = createdCases.length + '件の案件・計' + totalEntries + '件のメニューから' +
+      'ラベル' + (totalEntries * LABEL_COPIES_PER_ENTRY) + '枚を作成しました。\n' +
+      labelSs.getUrl();
+    ui.alert('ラベル作成 結果', message, ui.ButtonSet.OK);
   }
 
-  var message = createdCases.length + '件の案件・計' + totalEntries + '件のメニューから' +
-    'ラベル' + (totalEntries * LABEL_COPIES_PER_ENTRY) + '枚を作成しました。\n' +
-    labelSs.getUrl();
+  // 警告・エラーは通常の結果に埋もれて見落とされないよう、別ダイアログで目立たせて表示する
   if (warnings.length > 0) {
-    message += '\n警告: ' + warnings.join(' / ');
+    ui.alert('⚠ 警告（要確認）', warnings.join('\n'), ui.ButtonSet.OK);
   }
-  ui.alert(message);
 }
 
 /**
