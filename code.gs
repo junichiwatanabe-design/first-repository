@@ -7,6 +7,9 @@
  *
  * 実行方法:
  *   拡張機能 → Apps Script → 関数を選択して ▷ 実行
+ *
+ * 人時生産性の計算式:
+ *   人時生産性 = 粗利益（売上高 - 売上原価）÷ 総労働時間
  */
 
 // ============================================================
@@ -15,6 +18,7 @@
 const LABOR_SHEET_ID   = '1SrBKN0WboWVXT8xTHcNqGdAHxUywmzYmmwKry0y4HDw';
 const LABOR_SHEET_NAME = 'シート1'; // 実際のシート名が違う場合はここを変更
 const PERSON_COUNT     = 10;        // 担当者人数
+const TARGET_PROD      = 15000;     // 目標人時生産性（円/h）
 
 const COLOR = {
   darkBlue  : '#1F4E79',
@@ -84,22 +88,26 @@ function buildProductivityTable() {
 
   // ----------------------------------------------------------
   // ブロック2: 人時生産性テーブル（行15〜）
+  //
+  // 人時生産性 = 粗利益（売上高 - 売上原価）÷ 総労働時間
+  //
   // 列: A=担当者, B=総勤務時間, C=事務工数, D=製造時間,
-  //     E=事務時間率, F=売上, G=人時生産性全体, H=製造のみ,
-  //     I=目標差, J=製造機会損失額, K=必要削減時間
+  //     E=事務時間率, F=売上高[手動], G=売上原価[手動],
+  //     H=粗利益[自動], I=人時生産性全体, J=製造のみ,
+  //     K=目標差, L=製造機会損失額, M=必要削減時間
   // ----------------------------------------------------------
   const T = sumRow + 2;
 
-  sheet.getRange(T, 1, 1, 11).merge()
-    .setValue('▼ 人時生産性テーブル（売上を入力→自動計算）')
+  sheet.getRange(T, 1, 1, 13).merge()
+    .setValue('▼ 人時生産性テーブル（売上高・売上原価を入力→自動計算）')
     .setBackground(COLOR.darkBlue).setFontColor(COLOR.white)
     .setFontWeight('bold').setFontSize(12).setHorizontalAlignment('center');
 
-  sheet.getRange(T + 1, 1, 1, 11).setValues([[
+  sheet.getRange(T + 1, 1, 1, 13).setValues([[
     '担当者', '総勤務時間(h)', '事務工数(h)', '製造時間(h)',
-    '事務時間率', '売上(円)', '人時生産性・全体(¥/h)',
-    '人時生産性・製造のみ(¥/h)', '目標差(¥/h)',
-    '製造機会損失額(円)', '目標達成に必要な事務削減(h)'
+    '事務時間率', '売上高(円)', '売上原価(円)', '粗利益(円)',
+    '人時生産性・全体(¥/h)', '人時生産性・製造のみ(¥/h)',
+    '目標差(¥/h)', '製造機会損失額(円)', '目標達成に必要な事務削減(h)'
   ]]).setBackground(COLOR.midBlue).setFontColor(COLOR.white)
     .setFontWeight('bold').setHorizontalAlignment('center').setWrap(true);
   sheet.setRowHeight(T + 1, 52);
@@ -108,8 +116,8 @@ function buildProductivityTable() {
   const dataEnd   = T + 1 + N;
 
   for (let i = 0; i < N; i++) {
-    const r         = dataStart + i;
-    const laborRow  = 3 + i;
+    const r        = dataStart + i;
+    const laborRow = 3 + i;
 
     sheet.getRange(r, 1).setFormula(`=A${laborRow}`);
     sheet.getRange(r, 2).setFormula(`=G${laborRow}`).setNumberFormat('0.0"h"');
@@ -118,7 +126,7 @@ function buildProductivityTable() {
       .setNumberFormat('0.0"h"');
     setKpiFormulas(sheet, r);
 
-    if (i % 2 === 0) sheet.getRange(r, 1, 1, 11).setBackground(COLOR.lightGray);
+    if (i % 2 === 0) sheet.getRange(r, 1, 1, 13).setBackground(COLOR.lightGray);
   }
 
   // チーム合計行
@@ -128,38 +136,41 @@ function buildProductivityTable() {
   sheet.getRange(TR, 3).setFormula(`=SUM(C${dataStart}:C${dataEnd})`).setNumberFormat('0.0"h"');
   sheet.getRange(TR, 4).setFormula(`=MAX(B${TR}-C${TR},0)`).setNumberFormat('0.0"h"');
   sheet.getRange(TR, 5).setFormula(`=IF(B${TR}>0,C${TR}/B${TR},"")`).setNumberFormat('0.0%');
-  sheet.getRange(TR, 6).setBackground(COLOR.yellow).setNumberFormat('¥#,##0');
-  sheet.getRange(TR, 7).setFormula(`=IF(AND(ISNUMBER(F${TR}),B${TR}>0),F${TR}/B${TR},"")`).setNumberFormat('¥#,##0');
-  sheet.getRange(TR, 8).setFormula(`=IF(AND(ISNUMBER(F${TR}),D${TR}>0),F${TR}/D${TR},"")`).setNumberFormat('¥#,##0');
-  sheet.getRange(TR, 9).setFormula(`=IF(ISNUMBER(G${TR}),G${TR}-15000,"")`).setNumberFormat('¥#,##0');
-  sheet.getRange(TR, 10).setFormula(`=IF(C${TR}>0,C${TR}*15000,"")`).setNumberFormat('¥#,##0');
-  sheet.getRange(TR, 11).setFormula(`=IF(AND(ISNUMBER(F${TR}),B${TR}>0),B${TR}-(F${TR}/15000),"")`).setNumberFormat('0.0"h"');
-  sheet.getRange(TR, 1, 1, 11).setBackground(COLOR.lightBlue).setFontWeight('bold')
+  sheet.getRange(TR, 6).setFormula(`=SUM(F${dataStart}:F${dataEnd})`).setNumberFormat('¥#,##0').setBackground(COLOR.lightBlue);
+  sheet.getRange(TR, 7).setFormula(`=SUM(G${dataStart}:G${dataEnd})`).setNumberFormat('¥#,##0').setBackground(COLOR.lightBlue);
+  sheet.getRange(TR, 8).setFormula(`=F${TR}-G${TR}`).setNumberFormat('¥#,##0');
+  sheet.getRange(TR, 9).setFormula(`=IF(AND(ISNUMBER(H${TR}),B${TR}>0),H${TR}/B${TR},"")`).setNumberFormat('¥#,##0');
+  sheet.getRange(TR, 10).setFormula(`=IF(AND(ISNUMBER(H${TR}),D${TR}>0),H${TR}/D${TR},"")`).setNumberFormat('¥#,##0');
+  sheet.getRange(TR, 11).setFormula(`=IF(ISNUMBER(I${TR}),I${TR}-${TARGET_PROD},"")`).setNumberFormat('¥#,##0');
+  sheet.getRange(TR, 12).setFormula(`=IF(C${TR}>0,C${TR}*${TARGET_PROD},"")`).setNumberFormat('¥#,##0');
+  sheet.getRange(TR, 13).setFormula(`=IF(AND(ISNUMBER(H${TR}),B${TR}>0),B${TR}-(H${TR}/${TARGET_PROD}),"")`).setNumberFormat('0.0"h"');
+  sheet.getRange(TR, 1, 1, 13).setBackground(COLOR.lightBlue).setFontWeight('bold')
     .setBorder(true, true, true, true, true, true);
 
-  // 条件付き書式
+  // 条件付き書式（E列=事務時間率, K列=目標差）
   const rules = [];
   const eRng = sheet.getRange(`E${dataStart}:E${TR}`);
-  const iRng = sheet.getRange(`I${dataStart}:I${TR}`);
+  const kRng = sheet.getRange(`K${dataStart}:K${TR}`);
   rules.push(SpreadsheetApp.newConditionalFormatRule()
     .whenNumberGreaterThan(0.3).setBackground(COLOR.red).setFontColor(COLOR.white).setRanges([eRng]).build());
   rules.push(SpreadsheetApp.newConditionalFormatRule()
     .whenNumberBetween(0.2, 0.3).setBackground(COLOR.orange).setRanges([eRng]).build());
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenNumberLessThan(0).setBackground(COLOR.red).setFontColor(COLOR.white).setRanges([iRng]).build());
+    .whenNumberLessThan(0).setBackground(COLOR.red).setFontColor(COLOR.white).setRanges([kRng]).build());
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenNumberGreaterThanOrEqualTo(0).setBackground(COLOR.green).setFontColor(COLOR.white).setRanges([iRng]).build());
+    .whenNumberGreaterThanOrEqualTo(0).setBackground(COLOR.green).setFontColor(COLOR.white).setRanges([kRng]).build());
   sheet.setConditionalFormatRules(rules);
 
-  [100, 90, 90, 90, 80, 110, 145, 155, 110, 140, 165].forEach((w, i) => sheet.setColumnWidth(i + 1, w));
+  [100, 90, 90, 90, 80, 110, 110, 100, 145, 155, 110, 140, 165].forEach((w, i) => sheet.setColumnWidth(i + 1, w));
   sheet.setFrozenRows(2);
 
   Browser.msgBox(
     '✅ 人時生産性シートを作成しました！\n\n' +
     '① 初回のみ: IMPORTRANGE許可ダイアログ → 「許可」\n' +
-    '② 黄色セル（F列）に今週の売上を入力\n' +
-    '③ 事務時間率 赤=30%超 / 橙=20%超\n' +
-    '④ 目標差 赤=¥15,000/h未達 / 緑=達成'
+    '② 黄色セル（F列=売上高、G列=売上原価）を入力\n' +
+    '③ 粗利益（H列）と人時生産性が自動計算されます\n' +
+    '④ 事務時間率（E列）赤=30%超 / 橙=20%超\n' +
+    '⑤ 目標差（K列）赤=¥15,000/h未達 / 緑=達成'
   );
 }
 
@@ -182,7 +193,7 @@ function archiveCompletedTasks() {
        .copyTo(archive.getRange(1, 1));
   }
 
-  const lastRow  = src.getLastRow();
+  const lastRow = src.getLastRow();
   if (lastRow < 2) {
     Browser.msgBox('タスクが登録されていません。');
     return;
@@ -215,15 +226,35 @@ function archiveCompletedTasks() {
 // ヘルパー関数
 // ============================================================
 
+/**
+ * 人時生産性テーブルの各行に計算式を設定
+ *
+ * 列構造:
+ *   A=担当者, B=総勤務時間, C=事務工数, D=製造時間, E=事務時間率,
+ *   F=売上高[手動], G=売上原価[手動], H=粗利益[自動],
+ *   I=人時生産性全体, J=製造のみ, K=目標差, L=製造機会損失額, M=必要削減時間
+ */
 function setKpiFormulas(sheet, r) {
+  // D: 製造時間 = 総勤務時間 - 事務工数
   sheet.getRange(r, 4).setFormula(`=MAX(B${r}-C${r},0)`).setNumberFormat('0.0"h"');
+  // E: 事務時間率
   sheet.getRange(r, 5).setFormula(`=IF(B${r}>0,C${r}/B${r},"")`).setNumberFormat('0.0%');
+  // F: 売上高（手動入力）
   sheet.getRange(r, 6).setBackground(COLOR.yellow).setNumberFormat('¥#,##0');
-  sheet.getRange(r, 7).setFormula(`=IF(AND(ISNUMBER(F${r}),B${r}>0),F${r}/B${r},"")`).setNumberFormat('¥#,##0');
-  sheet.getRange(r, 8).setFormula(`=IF(AND(ISNUMBER(F${r}),D${r}>0),F${r}/D${r},"")`).setNumberFormat('¥#,##0');
-  sheet.getRange(r, 9).setFormula(`=IF(ISNUMBER(G${r}),G${r}-15000,"")`).setNumberFormat('¥#,##0');
-  sheet.getRange(r, 10).setFormula(`=IF(C${r}>0,C${r}*15000,"")`).setNumberFormat('¥#,##0');
-  sheet.getRange(r, 11).setFormula(`=IF(AND(ISNUMBER(F${r}),B${r}>0),B${r}-(F${r}/15000),"")`).setNumberFormat('0.0"h"');
+  // G: 売上原価（手動入力）
+  sheet.getRange(r, 7).setBackground(COLOR.yellow).setNumberFormat('¥#,##0');
+  // H: 粗利益 = 売上高 - 売上原価
+  sheet.getRange(r, 8).setFormula(`=IF(AND(ISNUMBER(F${r}),ISNUMBER(G${r})),F${r}-G${r},"")`).setNumberFormat('¥#,##0');
+  // I: 人時生産性・全体 = 粗利益 ÷ 総勤務時間
+  sheet.getRange(r, 9).setFormula(`=IF(AND(ISNUMBER(H${r}),B${r}>0),H${r}/B${r},"")`).setNumberFormat('¥#,##0');
+  // J: 人時生産性・製造のみ = 粗利益 ÷ 製造時間
+  sheet.getRange(r, 10).setFormula(`=IF(AND(ISNUMBER(H${r}),D${r}>0),H${r}/D${r},"")`).setNumberFormat('¥#,##0');
+  // K: 目標差 = 人時生産性全体 - 目標値
+  sheet.getRange(r, 11).setFormula(`=IF(ISNUMBER(I${r}),I${r}-${TARGET_PROD},"")`).setNumberFormat('¥#,##0');
+  // L: 製造機会損失額 = 事務工数 × 目標値
+  sheet.getRange(r, 12).setFormula(`=IF(C${r}>0,C${r}*${TARGET_PROD},"")`).setNumberFormat('¥#,##0');
+  // M: 目標達成に必要な事務削減 = 総勤務時間 - (粗利益 ÷ 目標値)
+  sheet.getRange(r, 13).setFormula(`=IF(AND(ISNUMBER(H${r}),B${r}>0),B${r}-(H${r}/${TARGET_PROD}),"")`).setNumberFormat('0.0"h"');
 }
 
 function col(n) {
