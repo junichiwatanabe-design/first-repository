@@ -70,6 +70,7 @@ function setupTaskBoard(ss) {
   sheet.clearContents();
   sheet.clearFormats();
   sheet.clearConditionalFormatRules();
+  sheet.clearDataValidations();
 
   var headers = ['タスクID','タスク名','カテゴリ','担当者','期限','状態','完了日','備考'];
   var headerRange = sheet.getRange(1, 1, 1, headers.length);
