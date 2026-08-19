@@ -219,17 +219,14 @@ function setupSummary(ss) {
   sheet.getRange(overdueStartRow, 1).setValue('■ 期限超過（未完了）').setFontWeight('bold').setFontSize(12).setFontColor('#CC0000');
   sheet.getRange(overdueStartRow + 1, 1, 1, 4).setValues([['タスク名', '担当者', '期限', '状態']]);
   sheet.getRange(overdueStartRow + 1, 1, 1, 4).setBackground('#FFCCCC').setFontWeight('bold').setHorizontalAlignment('center');
-  // FILTER: タスク名・担当者・期限(TEXT変換)・状態 の4列のみ返す
+  // FILTER: {}で4列を横結合して返す（CHOOSE はFILTER内で動作しないため）
   sheet.getRange(overdueStartRow + 2, 1).setFormula(
     '=IFERROR(FILTER(' +
-    'CHOOSE({1,2,3,4},' +
-    '\''+taskSheet+'\'!B3:B500,' +
-    '\''+taskSheet+'\'!D3:D500,' +
-    'TEXT(\''+taskSheet+'\'!E3:E500,"yyyy/MM/dd"),' +
-    '\''+taskSheet+'\'!F3:F500),' +
+    '{\''+taskSheet+'\'!B3:B500,\''+taskSheet+'\'!D3:D500,' +
+    'TEXT(\''+taskSheet+'\'!E3:E500,"yyyy/MM/dd"),\''+taskSheet+'\'!F3:F500},' +
     '\''+taskSheet+'\'!E3:E500<TODAY(),' +
     '\''+taskSheet+'\'!F3:F500<>"🟢 完了",' +
-    '\''+taskSheet+'\'!B3:B500<>""),"期限超過のタスクはありません")'
+    '\''+taskSheet+'\'!B3:B500<>""),"期限超過タスクなし")'
   );
 
   // 列幅
