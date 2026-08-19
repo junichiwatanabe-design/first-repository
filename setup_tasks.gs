@@ -188,7 +188,7 @@ function setupSummary(ss) {
   sheet.getRange('A5').setValue('■ 全体').setFontWeight('bold').setFontSize(12);
   sheet.getRange('A6:C6').setValues([['全タスク数', '完了数', '完了率']]);
   sheet.getRange('A6:C6').setBackground('#DAEEF3').setFontWeight('bold').setHorizontalAlignment('center');
-  sheet.getRange('A7').setFormula('=COUNTA(\''+taskSheet+'\'!B3:B500)-COUNTIF(\''+taskSheet+'\'!B3:B500,"")');
+  sheet.getRange('A7').setFormula('=COUNTA(\''+taskSheet+'\'!B3:B500)');
   sheet.getRange('B7').setFormula('=COUNTIF(\''+taskSheet+'\'!F3:F500,"🟢 完了")');
   sheet.getRange('C7').setFormula('=IF(A7>0,B7/A7,"")').setNumberFormat('0%');
   sheet.getRange('A7:C7').setHorizontalAlignment('center');
@@ -219,8 +219,14 @@ function setupSummary(ss) {
   sheet.getRange(overdueStartRow, 1).setValue('■ 期限超過（未完了）').setFontWeight('bold').setFontSize(12).setFontColor('#CC0000');
   sheet.getRange(overdueStartRow + 1, 1, 1, 4).setValues([['タスク名', '担当者', '期限', '状態']]);
   sheet.getRange(overdueStartRow + 1, 1, 1, 4).setBackground('#FFCCCC').setFontWeight('bold').setHorizontalAlignment('center');
+  // FILTER: タスク名・担当者・期限(TEXT変換)・状態 の4列のみ返す
   sheet.getRange(overdueStartRow + 2, 1).setFormula(
-    '=IFERROR(FILTER(\''+taskSheet+'\'!B3:H500,' +
+    '=IFERROR(FILTER(' +
+    'CHOOSE({1,2,3,4},' +
+    '\''+taskSheet+'\'!B3:B500,' +
+    '\''+taskSheet+'\'!D3:D500,' +
+    'TEXT(\''+taskSheet+'\'!E3:E500,"yyyy/MM/dd"),' +
+    '\''+taskSheet+'\'!F3:F500),' +
     '\''+taskSheet+'\'!E3:E500<TODAY(),' +
     '\''+taskSheet+'\'!F3:F500<>"🟢 完了",' +
     '\''+taskSheet+'\'!B3:B500<>""),"期限超過のタスクはありません")'
