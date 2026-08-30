@@ -626,15 +626,24 @@ function formatDateForMatch_(date, timeZone) {
 }
 
 /**
- * ファイル名内の日付表記のゆれ（区切り文字が `.` `/` `-` のいずれか、月日のゼロ埋め
- * あり/なしの両方）を吸収して該当日を検出するための正規表現を作る。
- * 例えば 2026年8月1日なら「2026.8.1」「2026/08/01」「2026-8-01」等すべてに一致する。
+ * ファイル名内の日付表記のゆれを吸収して該当日を検出するための正規表現を作る。
+ * 対応するのは以下の2パターン（例: 2026年8月1日の場合）。
+ *   - 区切りあり: 区切り文字が `.` `/` `-` のいずれか、月日はゼロ埋めあり/なしの両方
+ *     （「2026.8.1」「2026/08/01」「2026-8-01」等）
+ *   - 区切りなし: `yyyyMMdd` の8桁連結表記で月日は常に2桁ゼロ埋め固定（「20260801」）
+ *     （区切りがないと桁数の切れ目が曖昧になるため、こちらは2桁固定のみ許容する）
  * 前後が数字でない位置でのみ一致するため、日付以外の数字列を誤検出しない。
  */
 function buildFileNameDateRegex_(date, timeZone) {
   var year = Utilities.formatDate(date, timeZone, 'yyyy');
   var month = Number(Utilities.formatDate(date, timeZone, 'M'));
   var day = Number(Utilities.formatDate(date, timeZone, 'd'));
-  var pattern = '(^|\\D)' + year + '[./\\-]0?' + month + '[./\\-]0?' + day + '(\\D|$)';
+  var month2 = Utilities.formatDate(date, timeZone, 'MM');
+  var day2 = Utilities.formatDate(date, timeZone, 'dd');
+  var withSeparator = year + '[./\\-]0?' + month + '[./\\-]0?' + day;
+  var withoutSeparator = year + month2 + day2;
+  // 日付部分は非キャプチャグループ(?:...)にする。stripRedundantDatePrefix_が
+  // '$1$2'（前後の境界2グループ）で置換する前提のため、グループ番号をずらさない。
+  var pattern = '(^|\\D)(?:' + withSeparator + '|' + withoutSeparator + ')(\\D|$)';
   return new RegExp(pattern);
 }
