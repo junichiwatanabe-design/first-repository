@@ -131,9 +131,10 @@ function importData() {
     var targetDate = new Date(startDate.getTime());
     targetDate.setDate(targetDate.getDate() + i);
     var dateStr = formatDateForMatch_(targetDate, timeZone);
+    var dateRegex = buildFileNameDateRegex_(targetDate, timeZone);
 
     var matchedFiles = allFiles.filter(function (f) {
-      return f.name.indexOf(dateStr) !== -1;
+      return dateRegex.test(f.name);
     });
 
     if (matchedFiles.length === 0) {
@@ -144,7 +145,7 @@ function importData() {
     var createdDisplayNames = [];
     matchedFiles.forEach(function (f) {
       // 表示する名前は「企業名（またはファイル名から日付・記号を除いたもの）」にする
-      var displayName = stripRedundantDatePrefix_(f.name, dateStr);
+      var displayName = stripRedundantDatePrefix_(f.name, dateRegex);
       try {
         var sourceSheet = SpreadsheetApp.openById(f.id).getSheetByName(tabName);
         if (!sourceSheet) {
@@ -232,8 +233,13 @@ function setColumnFontSize_(sheet, colIndex, startRow1, numRows, fontSize) {
   sheet.getRange(startRow1, colIndex + 1, numRows, 1).setFontSize(fontSize);
 }
 
-function stripRedundantDatePrefix_(fileName, dateStr) {
-  var cleaned = fileName.split(dateStr).join('').trim();
+/**
+ * ファイル名から日付部分（dateRegexにマッチした箇所）を取り除く。
+ * 表記ゆれ（区切り文字・ゼロ埋めの有無）があっても実際に一致した箇所を除去できるよう、
+ * 固定文字列ではなく buildFileNameDateRegex_ で作った正規表現を受け取る。
+ */
+function stripRedundantDatePrefix_(fileName, dateRegex) {
+  var cleaned = fileName.replace(dateRegex, '$1$2').trim();
   cleaned = cleaned.replace(/^[【\[]\s*/, '').replace(/[】\]]\s*/, ' ').trim();
   return cleaned || fileName;
 }
@@ -614,7 +620,21 @@ function extractSpreadsheetId_(input) {
   return text;
 }
 
-/** ファイル名とのマッチングに使う日付文字列（`yyyy.M.d`形式）を作る。 */
+/** 表示・タブ名生成用の正規の日付文字列（`yyyy.M.d`形式、ゼロ埋めなし）を作る。 */
 function formatDateForMatch_(date, timeZone) {
   return Utilities.formatDate(date, timeZone, 'yyyy.M.d');
+}
+
+/**
+ * ファイル名内の日付表記のゆれ（区切り文字が `.` `/` `-` のいずれか、月日のゼロ埋め
+ * あり/なしの両方）を吸収して該当日を検出するための正規表現を作る。
+ * 例えば 2026年8月1日なら「2026.8.1」「2026/08/01」「2026-8-01」等すべてに一致する。
+ * 前後が数字でない位置でのみ一致するため、日付以外の数字列を誤検出しない。
+ */
+function buildFileNameDateRegex_(date, timeZone) {
+  var year = Utilities.formatDate(date, timeZone, 'yyyy');
+  var month = Number(Utilities.formatDate(date, timeZone, 'M'));
+  var day = Number(Utilities.formatDate(date, timeZone, 'd'));
+  var pattern = '(^|\\D)' + year + '[./\\-]0?' + month + '[./\\-]0?' + day + '(\\D|$)';
+  return new RegExp(pattern);
 }
