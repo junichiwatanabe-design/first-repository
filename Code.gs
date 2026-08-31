@@ -5,8 +5,8 @@
  * 案件ごとに別タブとしてコピーする（印刷時に案件単位で改ページされるよう
  * 1案件＝1タブの構成にしている）。
  *
- * ファイル名・保管場所の表記が揃っていない案件のために、URLを手動で
- * リストアップして読み込む代替手段（リンクからの読込）も持つ。
+ * また、URLを手動でリストアップした「案件リンク一覧」から案件実施日・企業名を
+ * 読み取って一覧表示するだけの補助機能（案件タブの作成やラベル作成は行わない）も持つ。
  *
  * さらに、集計済みの案件タブから日付・企業名・メニュー名・数量を集めて、
  * ラベル専用の別スプレッドシートへ印刷用ラベル（A4・24面）を作成する機能も持つ。
@@ -14,7 +14,7 @@
  * ファイル構成:
  *   1. 設定シート関連
  *   2. 日次データ取込（集計用スプレッドシートへの案件タブ作成）
- *   3. リンクからの案件読み込み
+ *   3. 案件リンク一覧への情報読込
  *   4. 印刷用ラベル作成
  *   5. 共通ヘルパー
  */
@@ -268,7 +268,7 @@ function uniqueSheetName_(ss, baseName) {
 }
 
 // ============================================================
-// 3. リンクからの案件読み込み
+// 3. 案件リンク一覧への情報読込
 // ============================================================
 
 var LINKS_SHEET_NAME = '案件リンク一覧';
@@ -276,6 +276,7 @@ var LINKS_SHEET_NAME = '案件リンク一覧';
 /**
  * 「案件リンク一覧」シートを取得する。無ければ見出し付きで新規作成し、
  * アラートを出して処理を中断する（getOrCreateConfigSheet_と同じパターン）。
+ * A列: URL（手入力）、B列: 案件実施日、C列: 企業名（どちらもimportFromLinksが自動入力）。
  */
 function getOrCreateLinksSheet_(ss) {
   var sheet = ss.getSheetByName(LINKS_SHEET_NAME);
@@ -285,7 +286,9 @@ function getOrCreateLinksSheet_(ss) {
 
   sheet = ss.insertSheet(LINKS_SHEET_NAME);
   sheet.getRange('A1').setValue('案件ファイルのリンク（1行に1件、URLを貼り付け）');
-  sheet.getRange('A1').setFontWeight('bold');
+  sheet.getRange('B1').setValue('案件実施日');
+  sheet.getRange('C1').setValue('企業名');
+  sheet.getRange('A1:C1').setFontWeight('bold');
 
   SpreadsheetApp.getUi().alert(
     '「' + LINKS_SHEET_NAME + '」シートを作成しました。' +
@@ -296,13 +299,10 @@ function getOrCreateLinksSheet_(ss) {
 
 /**
  * メニュー「日次データ取込」→「リンクから読込」から呼び出されるメイン関数。
- * ファイル名・保管場所の表記がバラバラで「データ読込」（フォルダ+日付の自動検出）
- * では拾いきれない案件のために、URLを手動で列挙したリストから読み込む代替手段。
- * 「設定」シートのB2（読み込むタブ名）のみ共用し、B1/B3/B4（フォルダ・起点日付・
- * 日数）は使わない。実行のたびに前回までの案件タブは全て削除してから作り直す
- * （importDataと同じ方針。案件タブの名前空間を共有しているため、データ読込と
- * リンクから読込のどちらを実行しても、その時点の入力内容だけが反映される＝
- * 一方の実行がもう一方の案件タブを消すことに注意）。
+ * 「案件リンク一覧」のA列に貼られたURLを1件ずつ開き、「設定」シートB2（読み込む
+ * タブ名）で指定したシートから案件実施日・企業名を読み取って、同じ行のB・C列に
+ * 書き込むだけのシンプルな機能。案件タブの作成やラベル作成はこの機能では行わない
+ * （タブの作成・複製が不要なぶん、ファイル名や保管場所のばらつきに影響されない）。
  */
 function importFromLinks() {
   var ui = SpreadsheetApp.getUi();
@@ -321,64 +321,56 @@ function importFromLinks() {
   if (!linksSheet) {
     return;
   }
-  var linkRowCount = Math.max(linksSheet.getLastRow() - 1, 0);
-  var linkValues = linkRowCount > 0 ? linksSheet.getRange(2, 1, linkRowCount, 1).getValues() : [];
-  var urls = linkValues
-    .map(function (row) { return String(row[0] || '').trim(); })
-    .filter(function (url) { return url !== ''; });
-
-  if (urls.length === 0) {
+  var numRows = Math.max(linksSheet.getLastRow() - 1, 0);
+  if (numRows === 0) {
     ui.alert('「' + LINKS_SHEET_NAME + '」シートのA列2行目以降にURLを入力してください。');
     return;
   }
 
   var timeZone = ss.getSpreadsheetTimeZone();
+  var urlRange = linksSheet.getRange(2, 1, numRows, 1);
+  var urls = urlRange.getValues().map(function (row) { return String(row[0] || '').trim(); });
 
-  // 実行のたびに前回までの案件タブをすべて削除してから作り直す（importDataと同じ方針）
-  deleteAllCaseSheets_(ss);
-
-  var createdDisplayNames = [];
+  var successCount = 0;
   var allWarnings = [];
-  urls.forEach(function (url) {
-    var spreadsheetId = extractSpreadsheetId_(url);
-    var displayName = url;
+  urls.forEach(function (url, i) {
+    var rowNum = i + 2;
+    var infoRange = linksSheet.getRange(rowNum, 2, 1, 2);
+    if (!url) {
+      infoRange.setValue('');
+      return;
+    }
+
+    var displayLabel = url;
     try {
-      var sourceSs = SpreadsheetApp.openById(spreadsheetId);
-      displayName = sourceSs.getName();
+      var sourceSs = SpreadsheetApp.openById(extractSpreadsheetId_(url));
+      displayLabel = sourceSs.getName();
 
       var sourceSheet = sourceSs.getSheetByName(tabName);
       if (!sourceSheet) {
-        allWarnings.push(displayName + ' : タブ「' + tabName + '」が見つかりません');
+        allWarnings.push(displayLabel + ' : タブ「' + tabName + '」が見つかりません');
+        infoRange.setValue('');
         return;
       }
       var values = sourceSheet.getDataRange().getValues();
       if (values.length === 0) {
-        allWarnings.push(displayName + ' : データがありません');
+        allWarnings.push(displayLabel + ' : データがありません');
+        infoRange.setValue('');
         return;
       }
 
-      var companyName = findAdjacentValue_(values, '企業名');
-      var caseDate = formatCaseDateForTabName_(findAdjacentValue_(values, '案件実施日'), timeZone);
-      displayName = companyName || displayName;
-      var baseName = sanitizeSheetName_((caseDate ? caseDate + ' ' : '') + displayName);
-      var newSheetName = uniqueSheetName_(ss, baseName);
-
-      // 元シートの書式を保つため copyTo() でシートごと複製する（importDataと同じ理由）
-      var newSheet = sourceSheet.copyTo(ss);
-      newSheet.setName(newSheetName);
-
-      // 数式由来の #REF! エラーを防ぐため、評価済みの値で上書きする（importDataと同じ理由）
-      newSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
-
-      applyCaseMenuFontSize_(newSheet, values);
-      createdDisplayNames.push(newSheetName);
+      var caseDate = formatCaseDateForDisplay_(findAdjacentValue_(values, '案件実施日'), timeZone);
+      var companyName = findAdjacentValue_(values, '企業名') || displayLabel;
+      linksSheet.getRange(rowNum, 2).setValue(caseDate);
+      linksSheet.getRange(rowNum, 3).setValue(companyName);
+      successCount++;
     } catch (e) {
-      allWarnings.push(displayName + ' : 処理中にエラーが発生しました（' + e.message + '）');
+      allWarnings.push(displayLabel + ' : 処理中にエラーが発生しました（' + e.message + '）');
+      infoRange.setValue('');
     }
   });
 
-  ui.alert('リンク読込 結果', createdDisplayNames.length + '件の案件を読み込みました（' +
-    createdDisplayNames.join(' / ') + '）', ui.ButtonSet.OK);
+  ui.alert('リンク読込 結果', successCount + '件のリンクから情報を読み込みました。', ui.ButtonSet.OK);
 
   // 警告・エラーは通常の結果に埋もれて見落とされないよう、別ダイアログで目立たせて表示する
   if (allWarnings.length > 0) {
@@ -387,11 +379,10 @@ function importFromLinks() {
 }
 
 /**
- * 「案件実施日」セルの値をタブ名用に整形する。Dateなら`yyyy.M.d`、文字列なら
- * そのままトリムして使う。タブの一意性・見た目のためだけに使い、ラベル出力の
- * 日付表示には影響しない（ラベル側は各タブ自身のセル内容から日付を読み直すため）。
+ * 「案件実施日」セルの値を一覧表示用に整形する。Dateなら`yyyy.M.d`、文字列なら
+ * そのままトリムして使う。
  */
-function formatCaseDateForTabName_(value, timeZone) {
+function formatCaseDateForDisplay_(value, timeZone) {
   if (!value) {
     return '';
   }
