@@ -5,14 +5,18 @@
  * 案件ごとに別タブとしてコピーする（印刷時に案件単位で改ページされるよう
  * 1案件＝1タブの構成にしている）。
  *
+ * ファイル名・保管場所の表記が揃っていない案件のために、URLを手動で
+ * リストアップして読み込む代替手段（リンクからの読込）も持つ。
+ *
  * さらに、集計済みの案件タブから日付・企業名・メニュー名・数量を集めて、
  * ラベル専用の別スプレッドシートへ印刷用ラベル（A4・24面）を作成する機能も持つ。
  *
  * ファイル構成:
  *   1. 設定シート関連
  *   2. 日次データ取込（集計用スプレッドシートへの案件タブ作成）
- *   3. 印刷用ラベル作成
- *   4. 共通ヘルパー
+ *   3. リンクからの案件読み込み
+ *   4. 印刷用ラベル作成
+ *   5. 共通ヘルパー
  */
 
 // ============================================================
@@ -52,6 +56,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('日次データ取込')
     .addItem('データ読込', 'importData')
+    .addItem('リンクから読込', 'importFromLinks')
     .addItem('ラベル作成', 'createLabels')
     .addToUi();
 }
@@ -192,13 +197,13 @@ function importData() {
 }
 
 /**
- * 「設定」シートを除く全ての案件タブを削除する。実行のたびに前回までの
- * 案件タブ（処理対象の日付範囲外だったものも含む）を一掃してから作り直すことで、
- * タブが際限なく増え続けるのを防ぐ。
+ * 「設定」「案件リンク一覧」シートを除く全ての案件タブを削除する。実行のたびに
+ * 前回までの案件タブ（処理対象の日付範囲外だったものも含む）を一掃してから
+ * 作り直すことで、タブが際限なく増え続けるのを防ぐ。
  */
 function deleteAllCaseSheets_(ss) {
   ss.getSheets().forEach(function (sheet) {
-    if (sheet.getName() === CONFIG_SHEET_NAME) {
+    if (sheet.getName() === CONFIG_SHEET_NAME || sheet.getName() === LINKS_SHEET_NAME) {
       return;
     }
     if (ss.getSheets().length > 1) {
@@ -263,7 +268,141 @@ function uniqueSheetName_(ss, baseName) {
 }
 
 // ============================================================
-// 3. 印刷用ラベル作成
+// 3. リンクからの案件読み込み
+// ============================================================
+
+var LINKS_SHEET_NAME = '案件リンク一覧';
+
+/**
+ * 「案件リンク一覧」シートを取得する。無ければ見出し付きで新規作成し、
+ * アラートを出して処理を中断する（getOrCreateConfigSheet_と同じパターン）。
+ */
+function getOrCreateLinksSheet_(ss) {
+  var sheet = ss.getSheetByName(LINKS_SHEET_NAME);
+  if (sheet) {
+    return sheet;
+  }
+
+  sheet = ss.insertSheet(LINKS_SHEET_NAME);
+  sheet.getRange('A1').setValue('案件ファイルのリンク（1行に1件、URLを貼り付け）');
+  sheet.getRange('A1').setFontWeight('bold');
+
+  SpreadsheetApp.getUi().alert(
+    '「' + LINKS_SHEET_NAME + '」シートを作成しました。' +
+    'A列2行目以降に案件ファイルのURLを1行に1件貼り付けてから再度実行してください。'
+  );
+  return null;
+}
+
+/**
+ * メニュー「日次データ取込」→「リンクから読込」から呼び出されるメイン関数。
+ * ファイル名・保管場所の表記がバラバラで「データ読込」（フォルダ+日付の自動検出）
+ * では拾いきれない案件のために、URLを手動で列挙したリストから読み込む代替手段。
+ * 「設定」シートのB2（読み込むタブ名）のみ共用し、B1/B3/B4（フォルダ・起点日付・
+ * 日数）は使わない。実行のたびに前回までの案件タブは全て削除してから作り直す
+ * （importDataと同じ方針。案件タブの名前空間を共有しているため、データ読込と
+ * リンクから読込のどちらを実行しても、その時点の入力内容だけが反映される＝
+ * 一方の実行がもう一方の案件タブを消すことに注意）。
+ */
+function importFromLinks() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var configSheet = getOrCreateConfigSheet_(ss);
+  if (!configSheet) {
+    return;
+  }
+  var tabName = configSheet.getRange(CONFIG_TAB_NAME_CELL).getValue();
+  if (!tabName) {
+    ui.alert('設定シートの「' + CONFIG_TAB_NAME_CELL + '」(タブ名) を入力してください。');
+    return;
+  }
+
+  var linksSheet = getOrCreateLinksSheet_(ss);
+  if (!linksSheet) {
+    return;
+  }
+  var linkRowCount = Math.max(linksSheet.getLastRow() - 1, 0);
+  var linkValues = linkRowCount > 0 ? linksSheet.getRange(2, 1, linkRowCount, 1).getValues() : [];
+  var urls = linkValues
+    .map(function (row) { return String(row[0] || '').trim(); })
+    .filter(function (url) { return url !== ''; });
+
+  if (urls.length === 0) {
+    ui.alert('「' + LINKS_SHEET_NAME + '」シートのA列2行目以降にURLを入力してください。');
+    return;
+  }
+
+  var timeZone = ss.getSpreadsheetTimeZone();
+
+  // 実行のたびに前回までの案件タブをすべて削除してから作り直す（importDataと同じ方針）
+  deleteAllCaseSheets_(ss);
+
+  var createdDisplayNames = [];
+  var allWarnings = [];
+  urls.forEach(function (url) {
+    var spreadsheetId = extractSpreadsheetId_(url);
+    var displayName = url;
+    try {
+      var sourceSs = SpreadsheetApp.openById(spreadsheetId);
+      displayName = sourceSs.getName();
+
+      var sourceSheet = sourceSs.getSheetByName(tabName);
+      if (!sourceSheet) {
+        allWarnings.push(displayName + ' : タブ「' + tabName + '」が見つかりません');
+        return;
+      }
+      var values = sourceSheet.getDataRange().getValues();
+      if (values.length === 0) {
+        allWarnings.push(displayName + ' : データがありません');
+        return;
+      }
+
+      var companyName = findAdjacentValue_(values, '企業名');
+      var caseDate = formatCaseDateForTabName_(findAdjacentValue_(values, '案件実施日'), timeZone);
+      displayName = companyName || displayName;
+      var baseName = sanitizeSheetName_((caseDate ? caseDate + ' ' : '') + displayName);
+      var newSheetName = uniqueSheetName_(ss, baseName);
+
+      // 元シートの書式を保つため copyTo() でシートごと複製する（importDataと同じ理由）
+      var newSheet = sourceSheet.copyTo(ss);
+      newSheet.setName(newSheetName);
+
+      // 数式由来の #REF! エラーを防ぐため、評価済みの値で上書きする（importDataと同じ理由）
+      newSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
+
+      applyCaseMenuFontSize_(newSheet, values);
+      createdDisplayNames.push(newSheetName);
+    } catch (e) {
+      allWarnings.push(displayName + ' : 処理中にエラーが発生しました（' + e.message + '）');
+    }
+  });
+
+  ui.alert('リンク読込 結果', createdDisplayNames.length + '件の案件を読み込みました（' +
+    createdDisplayNames.join(' / ') + '）', ui.ButtonSet.OK);
+
+  // 警告・エラーは通常の結果に埋もれて見落とされないよう、別ダイアログで目立たせて表示する
+  if (allWarnings.length > 0) {
+    ui.alert('⚠️要確認', allWarnings.join('\n'), ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * 「案件実施日」セルの値をタブ名用に整形する。Dateなら`yyyy.M.d`、文字列なら
+ * そのままトリムして使う。タブの一意性・見た目のためだけに使い、ラベル出力の
+ * 日付表示には影響しない（ラベル側は各タブ自身のセル内容から日付を読み直すため）。
+ */
+function formatCaseDateForTabName_(value, timeZone) {
+  if (!value) {
+    return '';
+  }
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    return Utilities.formatDate(value, timeZone, 'yyyy.M.d');
+  }
+  return String(value).trim();
+}
+
+// ============================================================
+// 4. 印刷用ラベル作成
 // ============================================================
 
 var LABEL_SHEET_NAME = 'ラベル印刷'; // 旧バージョンが残していた集計用シート名（あれば案件扱いから除外する）
@@ -310,7 +449,7 @@ function createLabels() {
   var warnings = [];
   ss.getSheets().forEach(function (sheet) {
     var name = sheet.getName();
-    if (name === CONFIG_SHEET_NAME || name === LABEL_SHEET_NAME) {
+    if (name === CONFIG_SHEET_NAME || name === LABEL_SHEET_NAME || name === LINKS_SHEET_NAME) {
       return;
     }
     caseSheetNames.push(name);
@@ -541,7 +680,7 @@ function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
 }
 
 // ============================================================
-// 4. 共通ヘルパー
+// 5. 共通ヘルパー
 // ============================================================
 
 /**
