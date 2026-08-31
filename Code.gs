@@ -1,23 +1,18 @@
 /**
- * 特定フォルダ内の複数スプレッドシートファイル（案件ごと）から、
- * ファイル名に含まれる日付（例: 2026.7.13）をもとに
- * 起点日付から指定日数分の案件を抽出し、集計用スプレッドシートへ
- * 案件ごとに別タブとしてコピーする（印刷時に案件単位で改ページされるよう
- * 1案件＝1タブの構成にしている）。
- *
- * ファイル名・保管場所の表記が揃っていない案件のために、URLを手動でリストアップした
- * 「案件リンク一覧」から読み込む代替手段も持つ（案件実施日・企業名を一覧に表示しつつ、
- * 通常の案件タブと同様にリンク先の内容をコピーしたタブも作成する）。
+ * 「案件リンク一覧」シートに手入力した案件ファイルのURLを1件ずつ開き、
+ * ファイル名から案件実施日・企業名を読み取って一覧に表示するとともに、
+ * 「設定」シートで指定したタブ名の内容を集計用スプレッドシートへ案件ごとに
+ * 別タブとしてコピーする（印刷時に案件単位で改ページされるよう1案件＝1タブの
+ * 構成にしている）。
  *
  * さらに、集計済みの案件タブから日付・企業名・メニュー名・数量を集めて、
  * ラベル専用の別スプレッドシートへ印刷用ラベル（A4・24面）を作成する機能も持つ。
  *
  * ファイル構成:
  *   1. 設定シート関連
- *   2. 日次データ取込（集計用スプレッドシートへの案件タブ作成）
- *   3. リンクからの案件読み込み
- *   4. 印刷用ラベル作成
- *   5. 共通ヘルパー
+ *   2. リンクからの案件読み込み
+ *   3. 印刷用ラベル作成
+ *   4. 共通ヘルパー
  */
 
 // ============================================================
@@ -25,11 +20,8 @@
 // ============================================================
 
 var CONFIG_SHEET_NAME = '設定';
-var CONFIG_FOLDER_CELL = 'B1';       // 対象フォルダの URL/ID
-var CONFIG_TAB_NAME_CELL = 'B2';     // 各ファイル内で読み込む固定タブ名
-var CONFIG_START_DATE_CELL = 'B3';   // 起点日付
-var CONFIG_DAYS_CELL = 'B4';         // 読み込み日数（1〜MAX_DAYS_TO_READ）
-var CONFIG_LABEL_SS_CELL = 'B5';     // ラベル出力先スプレッドシートの URL/ID（自動設定）
+var CONFIG_TAB_NAME_CELL = 'B1';  // 各ファイル内で読み込む固定タブ名
+var CONFIG_LABEL_SS_CELL = 'B2';  // ラベル出力先スプレッドシートの URL/ID（自動設定）
 
 function getOrCreateConfigSheet_(ss) {
   var sheet = ss.getSheetByName(CONFIG_SHEET_NAME);
@@ -38,17 +30,13 @@ function getOrCreateConfigSheet_(ss) {
   }
 
   sheet = ss.insertSheet(CONFIG_SHEET_NAME);
-  sheet.getRange('A1').setValue('対象フォルダURL/ID');
-  sheet.getRange('A2').setValue('読み込むタブ名');
-  sheet.getRange('A3').setValue('起点日付');
-  sheet.getRange('A4').setValue('読み込み日数（1〜' + MAX_DAYS_TO_READ + '、空欄で' + DEFAULT_DAYS_TO_READ + '日）');
-  sheet.getRange('A5').setValue('ラベル出力先スプレッドシートID（自動設定・空欄でOK）');
-  sheet.getRange('A1:A5').setFontWeight('bold');
+  sheet.getRange('A1').setValue('読み込むタブ名');
+  sheet.getRange('A2').setValue('ラベル出力先スプレッドシートID（自動設定・空欄でOK）');
+  sheet.getRange('A1:A2').setFontWeight('bold');
 
   SpreadsheetApp.getUi().alert(
     '「' + CONFIG_SHEET_NAME + '」シートを作成しました。' +
-    CONFIG_FOLDER_CELL + '/' + CONFIG_TAB_NAME_CELL + '/' + CONFIG_START_DATE_CELL +
-    ' に値を入力してから再度実行してください。'
+    CONFIG_TAB_NAME_CELL + ' に読み込むタブ名を入力してから再度実行してください。'
   );
   return null;
 }
@@ -56,140 +44,138 @@ function getOrCreateConfigSheet_(ss) {
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('日次データ取込')
-    .addItem('データ読込', 'importData')
     .addItem('リンクから読込', 'importFromLinks')
     .addItem('ラベル作成', 'createLabels')
     .addToUi();
 }
 
 // ============================================================
-// 2. 日次データ取込（集計用スプレッドシートへの案件タブ作成）
+// 2. リンクからの案件読み込み
 // ============================================================
 
-var DEFAULT_DAYS_TO_READ = 5;
-var MAX_DAYS_TO_READ = 5;
+var LINKS_SHEET_NAME = '案件リンク一覧';
 var CASE_MENU_FONT_SIZE = 14; // 案件タブの「メニュー名」「数量」列のデータ行だけ適用するフォントサイズ
 
 /**
- * メニュー「日次データ取込」→「データ読込」から呼び出されるメイン関数。
- * 「設定」シートの内容に従い、対象フォルダ内の案件ファイルから起点日付〜指定日数分を
- * 検出し、各案件を集計用スプレッドシート内の個別タブとしてコピーする。
- * 実行のたびに前回までの案件タブは全て削除してから作り直す（deleteAllCaseSheets_）。
+ * 「案件リンク一覧」シートを取得する。無ければ見出し付きで新規作成し、
+ * アラートを出して処理を中断する（getOrCreateConfigSheet_と同じパターン）。
+ * A列: URL（手入力）、B列: 案件実施日、C列: 企業名（どちらもimportFromLinksが
+ * ファイル名から読み取って自動入力する）。
  */
-function importData() {
+function getOrCreateLinksSheet_(ss) {
+  var sheet = ss.getSheetByName(LINKS_SHEET_NAME);
+  if (sheet) {
+    return sheet;
+  }
+
+  sheet = ss.insertSheet(LINKS_SHEET_NAME);
+  sheet.getRange('A1').setValue('案件ファイルのリンク（1行に1件、URLを貼り付け）');
+  sheet.getRange('B1').setValue('案件実施日');
+  sheet.getRange('C1').setValue('企業名');
+  sheet.getRange('A1:C1').setFontWeight('bold');
+
+  SpreadsheetApp.getUi().alert(
+    '「' + LINKS_SHEET_NAME + '」シートを作成しました。' +
+    'A列2行目以降に案件ファイルのURLを1行に1件貼り付けてから再度実行してください。'
+  );
+  return null;
+}
+
+/**
+ * メニュー「日次データ取込」→「リンクから読込」から呼び出されるメイン関数。
+ * 「案件リンク一覧」のA列に貼られたURLを1件ずつ開き、リンク先ファイルの名前
+ * （Driveのファイル名）から案件実施日・企業名を読み取って同じ行のB・C列に
+ * 表示するとともに、「案件実施日 + 企業名」で名前をつけた案件タブを作成し、
+ * 「設定」シートB1で指定したタブ名の内容をそのままコピーする。
+ * 実行のたびに前回までの案件タブは全て削除してから作り直す
+ * （deleteAllCaseSheets_。案件タブが際限なく増え続けるのを防ぐ）。
+ */
+function importFromLinks() {
   var ui = SpreadsheetApp.getUi();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var configSheet = getOrCreateConfigSheet_(ss);
   if (!configSheet) {
     return;
   }
-
-  var folderInput = configSheet.getRange(CONFIG_FOLDER_CELL).getValue();
   var tabName = configSheet.getRange(CONFIG_TAB_NAME_CELL).getValue();
-  var startDateValue = configSheet.getRange(CONFIG_START_DATE_CELL).getValue();
-
-  if (!folderInput || !tabName || !startDateValue) {
-    ui.alert(
-      '設定シートの「' + CONFIG_FOLDER_CELL + '」(フォルダURL/ID)、「' +
-      CONFIG_TAB_NAME_CELL + '」(タブ名)、「' + CONFIG_START_DATE_CELL +
-      '」(起点日付) をすべて入力してください。'
-    );
+  if (!tabName) {
+    ui.alert('設定シートの「' + CONFIG_TAB_NAME_CELL + '」(タブ名) を入力してください。');
     return;
   }
 
-  var startDate = startDateValue instanceof Date ? startDateValue : new Date(startDateValue);
-  if (isNaN(startDate.getTime())) {
-    ui.alert('起点日付(' + CONFIG_START_DATE_CELL + ')が日付として認識できません。');
+  var linksSheet = getOrCreateLinksSheet_(ss);
+  if (!linksSheet) {
+    return;
+  }
+  var numRows = Math.max(linksSheet.getLastRow() - 1, 0);
+  if (numRows === 0) {
+    ui.alert('「' + LINKS_SHEET_NAME + '」シートのA列2行目以降にURLを入力してください。');
     return;
   }
 
-  var daysValue = configSheet.getRange(CONFIG_DAYS_CELL).getValue();
-  var daysToRead = DEFAULT_DAYS_TO_READ;
-  if (daysValue !== '' && daysValue !== null) {
-    daysToRead = Number(daysValue);
-    if (!Number.isInteger(daysToRead) || daysToRead < 1 || daysToRead > MAX_DAYS_TO_READ) {
-      ui.alert(
-        '「' + CONFIG_DAYS_CELL + '」(読み込み日数) は1〜' + MAX_DAYS_TO_READ + 'の整数で入力してください。'
-      );
-      return;
-    }
-  }
-
-  var folderId = extractFolderId_(folderInput);
-  var folder;
-  try {
-    folder = DriveApp.getFolderById(folderId);
-  } catch (e) {
-    ui.alert('フォルダが見つかりません。フォルダURL/IDを確認してください。');
-    return;
-  }
-
-  var timeZone = ss.getSpreadsheetTimeZone();
-  var allFiles = collectSpreadsheetFiles_(folder, ss.getId());
+  var urls = linksSheet.getRange(2, 1, numRows, 1).getValues()
+    .map(function (row) { return String(row[0] || '').trim(); });
 
   // 実行のたびに前回までの案件タブをすべて削除してから作り直す
-  // （範囲外の古い日付のタブも含めて残さない）
   deleteAllCaseSheets_(ss);
 
-  var summaryLines = [];
+  var createdDisplayNames = [];
   var allWarnings = [];
-  for (var i = 0; i < daysToRead; i++) {
-    var targetDate = new Date(startDate.getTime());
-    targetDate.setDate(targetDate.getDate() + i);
-    var dateStr = formatDateForMatch_(targetDate, timeZone);
-    var dateRegex = buildFileNameDateRegex_(targetDate, timeZone);
-
-    var matchedFiles = allFiles.filter(function (f) {
-      return dateRegex.test(f.name);
-    });
-
-    if (matchedFiles.length === 0) {
-      summaryLines.push(dateStr + ' : 該当ファイルなし');
-      continue;
+  urls.forEach(function (url, i) {
+    var rowNum = i + 2;
+    var infoRange = linksSheet.getRange(rowNum, 2, 1, 2);
+    if (!url) {
+      infoRange.setValue('');
+      return;
     }
 
-    var createdDisplayNames = [];
-    matchedFiles.forEach(function (f) {
-      // 表示する名前は「企業名（またはファイル名から日付・記号を除いたもの）」にする
-      var displayName = stripRedundantDatePrefix_(f.name, dateRegex);
-      try {
-        var sourceSheet = SpreadsheetApp.openById(f.id).getSheetByName(tabName);
-        if (!sourceSheet) {
-          allWarnings.push(dateStr + ' ' + displayName + ' : タブ「' + tabName + '」が見つかりません');
-          return;
-        }
-        var values = sourceSheet.getDataRange().getValues();
-        if (values.length === 0) {
-          allWarnings.push(dateStr + ' ' + displayName + ' : データがありません');
-          return;
-        }
+    var displayLabel = url;
+    try {
+      var sourceSs = SpreadsheetApp.openById(extractSpreadsheetId_(url));
+      displayLabel = sourceSs.getName();
+      var parsed = extractDateAndCompanyFromFileName_(displayLabel);
 
-        var companyName = findAdjacentValue_(values, '企業名');
-        displayName = companyName || displayName;
-        var baseName = sanitizeSheetName_(dateStr + ' ' + displayName);
-        var newSheetName = uniqueSheetName_(ss, baseName);
-
-        // 元シートの書式（フォント・背景色・罫線・セル結合・列幅など）を保つため
-        // getValues()+setValues() ではなく copyTo() でシートごと複製する。
-        var newSheet = sourceSheet.copyTo(ss);
-        newSheet.setName(newSheetName);
-
-        // ただし copyTo() は数式（他シート参照など）もそのままコピーしてしまい、
-        // 集計先で参照が切れて #REF! 等のエラーになることがある。コピー前に
-        // 評価済みの値（values）で上書きし、セルの中身を確定値にする（書式は変えない）。
-        newSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
-
-        applyCaseMenuFontSize_(newSheet, values);
-        createdDisplayNames.push(displayName);
-      } catch (e) {
-        allWarnings.push(dateStr + ' ' + displayName + ' : 処理中にエラーが発生しました（' + e.message + '）');
+      var sourceSheet = sourceSs.getSheetByName(tabName);
+      if (!sourceSheet) {
+        allWarnings.push(displayLabel + ' : タブ「' + tabName + '」が見つかりません');
+        infoRange.setValue('');
+        return;
       }
-    });
+      var values = sourceSheet.getDataRange().getValues();
+      if (values.length === 0) {
+        allWarnings.push(displayLabel + ' : データがありません');
+        infoRange.setValue('');
+        return;
+      }
 
-    summaryLines.push(dateStr + ' : ' + createdDisplayNames.length + '件（' + createdDisplayNames.join(' / ') + '）');
-  }
+      // 「案件リンク一覧」の同じ行にファイル名由来の案件実施日・企業名を表示する
+      linksSheet.getRange(rowNum, 2).setValue(parsed.date);
+      linksSheet.getRange(rowNum, 3).setValue(parsed.company);
 
-  ui.alert('データ読込 結果', summaryLines.join('\n'), ui.ButtonSet.OK);
+      // 案件タブを作成し、リンク先の内容をそのままコピーする
+      var baseName = sanitizeSheetName_((parsed.date ? parsed.date + ' ' : '') + parsed.company);
+      var newSheetName = uniqueSheetName_(ss, baseName);
+
+      // 元シートの書式（フォント・背景色・罫線・セル結合・列幅など）を保つため
+      // getValues()+setValues() ではなく copyTo() でシートごと複製する。
+      var newSheet = sourceSheet.copyTo(ss);
+      newSheet.setName(newSheetName);
+
+      // copyTo() は数式（他シート参照など）もそのままコピーしてしまい、集計先で
+      // 参照が切れて #REF! 等のエラーになることがある。コピー前に評価済みの値
+      // （values）で上書きし、セルの中身を確定値にする（書式は変えない）。
+      newSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
+
+      applyCaseMenuFontSize_(newSheet, values);
+      createdDisplayNames.push(newSheetName);
+    } catch (e) {
+      allWarnings.push(displayLabel + ' : 処理中にエラーが発生しました（' + e.message + '）');
+      infoRange.setValue('');
+    }
+  });
+
+  ui.alert('リンク読込 結果', createdDisplayNames.length + '件の案件を読み込みました（' +
+    createdDisplayNames.join(' / ') + '）', ui.ButtonSet.OK);
 
   // 警告・エラーは通常の結果に埋もれて見落とされないよう、別ダイアログで目立たせて表示する
   if (allWarnings.length > 0) {
@@ -198,9 +184,35 @@ function importData() {
 }
 
 /**
+ * ファイル名から日付部分を抜き出し、日付テキストと残りの文字列（企業名。前後の
+ * 【】/[]は取り除く）を返す。対応する日付表記は以下の2パターン。
+ *   - 区切りあり: 区切り文字が `.` `/` `-` のいずれか、月日はゼロ埋めあり/なしの両方
+ *     （「2026.8.1」「2026/08/01」「2026-8-01」等）
+ *   - 区切りなし: `yyyyMMdd` の8桁連結表記で月日は常に2桁ゼロ埋め固定（「20260801」）
+ * 日付が見つからない場合、dateは空文字になりcompanyはファイル名そのまま（記号除去のみ）。
+ */
+function extractDateAndCompanyFromFileName_(fileName) {
+  var m = fileName.match(/(^|\D)(\d{4})[./\-](\d{1,2})[./\-](\d{1,2})(\D|$)/) ||
+    fileName.match(/(^|\D)(\d{4})(\d{2})(\d{2})(\D|$)/);
+  if (!m) {
+    return { date: '', company: cleanCompanyText_(fileName) };
+  }
+  var dateText = m[2] + '.' + Number(m[3]) + '.' + Number(m[4]);
+  var remaining = fileName.substring(0, m.index) + m[1] + m[5] +
+    fileName.substring(m.index + m[0].length);
+  return { date: dateText, company: cleanCompanyText_(remaining) };
+}
+
+/** ファイル名から前後の【】/[]などの記号を取り除く。 */
+function cleanCompanyText_(text) {
+  var cleaned = String(text).trim();
+  cleaned = cleaned.replace(/^[【\[]\s*/, '').replace(/[】\]]\s*/, ' ').trim();
+  return cleaned || String(text).trim();
+}
+
+/**
  * 「設定」「案件リンク一覧」シートを除く全ての案件タブを削除する。実行のたびに
- * 前回までの案件タブ（処理対象の日付範囲外だったものも含む）を一掃してから
- * 作り直すことで、タブが際限なく増え続けるのを防ぐ。
+ * 前回までの案件タブを一掃してから作り直すことで、タブが際限なく増え続けるのを防ぐ。
  */
 function deleteAllCaseSheets_(ss) {
   ss.getSheets().forEach(function (sheet) {
@@ -239,17 +251,6 @@ function setColumnFontSize_(sheet, colIndex, startRow1, numRows, fontSize) {
   sheet.getRange(startRow1, colIndex + 1, numRows, 1).setFontSize(fontSize);
 }
 
-/**
- * ファイル名から日付部分（dateRegexにマッチした箇所）を取り除く。
- * 表記ゆれ（区切り文字・ゼロ埋めの有無）があっても実際に一致した箇所を除去できるよう、
- * 固定文字列ではなく buildFileNameDateRegex_ で作った正規表現を受け取る。
- */
-function stripRedundantDatePrefix_(fileName, dateRegex) {
-  var cleaned = fileName.replace(dateRegex, '$1$2').trim();
-  cleaned = cleaned.replace(/^[【\[]\s*/, '').replace(/[】\]]\s*/, ' ').trim();
-  return cleaned || fileName;
-}
-
 function sanitizeSheetName_(name) {
   var sanitized = String(name).replace(/[\[\]\*\?\/\\:]/g, '_').trim();
   if (sanitized.length > 100) {
@@ -269,156 +270,7 @@ function uniqueSheetName_(ss, baseName) {
 }
 
 // ============================================================
-// 3. リンクからの案件読み込み
-// ============================================================
-
-var LINKS_SHEET_NAME = '案件リンク一覧';
-
-/**
- * 「案件リンク一覧」シートを取得する。無ければ見出し付きで新規作成し、
- * アラートを出して処理を中断する（getOrCreateConfigSheet_と同じパターン）。
- * A列: URL（手入力）、B列: 案件実施日、C列: 企業名（どちらもimportFromLinksが自動入力）。
- */
-function getOrCreateLinksSheet_(ss) {
-  var sheet = ss.getSheetByName(LINKS_SHEET_NAME);
-  if (sheet) {
-    return sheet;
-  }
-
-  sheet = ss.insertSheet(LINKS_SHEET_NAME);
-  sheet.getRange('A1').setValue('案件ファイルのリンク（1行に1件、URLを貼り付け）');
-  sheet.getRange('B1').setValue('案件実施日');
-  sheet.getRange('C1').setValue('企業名');
-  sheet.getRange('A1:C1').setFontWeight('bold');
-
-  SpreadsheetApp.getUi().alert(
-    '「' + LINKS_SHEET_NAME + '」シートを作成しました。' +
-    'A列2行目以降に案件ファイルのURLを1行に1件貼り付けてから再度実行してください。'
-  );
-  return null;
-}
-
-/**
- * メニュー「日次データ取込」→「リンクから読込」から呼び出されるメイン関数。
- * 「案件リンク一覧」のA列に貼られたURLを1件ずつ開き、「設定」シートB2（読み込む
- * タブ名）で指定したシートから案件実施日・企業名を読み取って同じ行のB・C列に
- * 表示するとともに、「案件実施日 + 企業名」で名前をつけた案件タブを作成し、
- * リンク先の内容をそのままコピーする（importDataと同じcopyTo方式）。
- * 実行のたびに前回までの案件タブは全て削除してから作り直す（importDataと同じ方針。
- * 案件タブの名前空間を共有しているため、データ読込とリンクから読込のどちらを
- * 実行しても、その時点の入力内容だけが反映される＝一方の実行がもう一方の
- * 案件タブを消すことに注意）。
- */
-function importFromLinks() {
-  var ui = SpreadsheetApp.getUi();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var configSheet = getOrCreateConfigSheet_(ss);
-  if (!configSheet) {
-    return;
-  }
-  var tabName = configSheet.getRange(CONFIG_TAB_NAME_CELL).getValue();
-  if (!tabName) {
-    ui.alert('設定シートの「' + CONFIG_TAB_NAME_CELL + '」(タブ名) を入力してください。');
-    return;
-  }
-
-  var linksSheet = getOrCreateLinksSheet_(ss);
-  if (!linksSheet) {
-    return;
-  }
-  var numRows = Math.max(linksSheet.getLastRow() - 1, 0);
-  if (numRows === 0) {
-    ui.alert('「' + LINKS_SHEET_NAME + '」シートのA列2行目以降にURLを入力してください。');
-    return;
-  }
-
-  var timeZone = ss.getSpreadsheetTimeZone();
-  var urlRange = linksSheet.getRange(2, 1, numRows, 1);
-  var urls = urlRange.getValues().map(function (row) { return String(row[0] || '').trim(); });
-
-  // 実行のたびに前回までの案件タブをすべて削除してから作り直す（importDataと同じ方針）
-  deleteAllCaseSheets_(ss);
-
-  var createdDisplayNames = [];
-  var allWarnings = [];
-  urls.forEach(function (url, i) {
-    var rowNum = i + 2;
-    var infoRange = linksSheet.getRange(rowNum, 2, 1, 2);
-    if (!url) {
-      infoRange.setValue('');
-      return;
-    }
-
-    var displayLabel = url;
-    try {
-      var sourceSs = SpreadsheetApp.openById(extractSpreadsheetId_(url));
-      displayLabel = sourceSs.getName();
-
-      var sourceSheet = sourceSs.getSheetByName(tabName);
-      if (!sourceSheet) {
-        allWarnings.push(displayLabel + ' : タブ「' + tabName + '」が見つかりません');
-        infoRange.setValue('');
-        return;
-      }
-      var values = sourceSheet.getDataRange().getValues();
-      if (values.length === 0) {
-        allWarnings.push(displayLabel + ' : データがありません');
-        infoRange.setValue('');
-        return;
-      }
-
-      var caseDate = formatCaseDateForDisplay_(findAdjacentValue_(values, '案件実施日'), timeZone);
-      var companyName = findAdjacentValue_(values, '企業名') || displayLabel;
-
-      // 「案件リンク一覧」の同じ行にも案件実施日・企業名を表示する
-      linksSheet.getRange(rowNum, 2).setValue(caseDate);
-      linksSheet.getRange(rowNum, 3).setValue(companyName);
-
-      // 案件タブを作成し、リンク先の内容をそのままコピーする
-      var baseName = sanitizeSheetName_((caseDate ? caseDate + ' ' : '') + companyName);
-      var newSheetName = uniqueSheetName_(ss, baseName);
-
-      // 元シートの書式（フォント・背景色・罫線・セル結合・列幅など）を保つため
-      // getValues()+setValues() ではなく copyTo() でシートごと複製する（importDataと同じ理由）。
-      var newSheet = sourceSheet.copyTo(ss);
-      newSheet.setName(newSheetName);
-
-      // 数式由来の #REF! エラーを防ぐため、評価済みの値で上書きする（importDataと同じ理由）
-      newSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
-
-      applyCaseMenuFontSize_(newSheet, values);
-      createdDisplayNames.push(newSheetName);
-    } catch (e) {
-      allWarnings.push(displayLabel + ' : 処理中にエラーが発生しました（' + e.message + '）');
-      infoRange.setValue('');
-    }
-  });
-
-  ui.alert('リンク読込 結果', createdDisplayNames.length + '件の案件を読み込みました（' +
-    createdDisplayNames.join(' / ') + '）', ui.ButtonSet.OK);
-
-  // 警告・エラーは通常の結果に埋もれて見落とされないよう、別ダイアログで目立たせて表示する
-  if (allWarnings.length > 0) {
-    ui.alert('⚠️要確認', allWarnings.join('\n'), ui.ButtonSet.OK);
-  }
-}
-
-/**
- * 「案件実施日」セルの値を一覧表示用に整形する。Dateなら`yyyy.M.d`、文字列なら
- * そのままトリムして使う。
- */
-function formatCaseDateForDisplay_(value, timeZone) {
-  if (!value) {
-    return '';
-  }
-  if (Object.prototype.toString.call(value) === '[object Date]') {
-    return Utilities.formatDate(value, timeZone, 'yyyy.M.d');
-  }
-  return String(value).trim();
-}
-
-// ============================================================
-// 4. 印刷用ラベル作成
+// 3. 印刷用ラベル作成
 // ============================================================
 
 var LABEL_SHEET_NAME = 'ラベル印刷'; // 旧バージョンが残していた集計用シート名（あれば案件扱いから除外する）
@@ -696,7 +548,7 @@ function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
 }
 
 // ============================================================
-// 5. 共通ヘルパー
+// 4. 共通ヘルパー
 // ============================================================
 
 /**
@@ -741,30 +593,6 @@ function findCellByValue_(values, targetText) {
   return null;
 }
 
-/** フォルダ内のGoogleスプレッドシートファイル一覧を返す（集計用スプレッドシート自身は除外）。 */
-function collectSpreadsheetFiles_(folder, excludeFileId) {
-  var files = [];
-  var iterator = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
-  while (iterator.hasNext()) {
-    var file = iterator.next();
-    if (file.getId() === excludeFileId) {
-      continue;
-    }
-    files.push({ id: file.getId(), name: file.getName() });
-  }
-  return files;
-}
-
-/** フォルダのURLまたは素のIDから、フォルダIDを取り出す。 */
-function extractFolderId_(input) {
-  var text = String(input).trim();
-  var match = text.match(/\/folders\/([a-zA-Z0-9_-]+)/);
-  if (match) {
-    return match[1];
-  }
-  return text;
-}
-
 /** スプレッドシートのURLまたは素のIDから、スプレッドシートIDを取り出す。 */
 function extractSpreadsheetId_(input) {
   var text = String(input).trim();
@@ -773,32 +601,4 @@ function extractSpreadsheetId_(input) {
     return match[1];
   }
   return text;
-}
-
-/** 表示・タブ名生成用の正規の日付文字列（`yyyy.M.d`形式、ゼロ埋めなし）を作る。 */
-function formatDateForMatch_(date, timeZone) {
-  return Utilities.formatDate(date, timeZone, 'yyyy.M.d');
-}
-
-/**
- * ファイル名内の日付表記のゆれを吸収して該当日を検出するための正規表現を作る。
- * 対応するのは以下の2パターン（例: 2026年8月1日の場合）。
- *   - 区切りあり: 区切り文字が `.` `/` `-` のいずれか、月日はゼロ埋めあり/なしの両方
- *     （「2026.8.1」「2026/08/01」「2026-8-01」等）
- *   - 区切りなし: `yyyyMMdd` の8桁連結表記で月日は常に2桁ゼロ埋め固定（「20260801」）
- *     （区切りがないと桁数の切れ目が曖昧になるため、こちらは2桁固定のみ許容する）
- * 前後が数字でない位置でのみ一致するため、日付以外の数字列を誤検出しない。
- */
-function buildFileNameDateRegex_(date, timeZone) {
-  var year = Utilities.formatDate(date, timeZone, 'yyyy');
-  var month = Number(Utilities.formatDate(date, timeZone, 'M'));
-  var day = Number(Utilities.formatDate(date, timeZone, 'd'));
-  var month2 = Utilities.formatDate(date, timeZone, 'MM');
-  var day2 = Utilities.formatDate(date, timeZone, 'dd');
-  var withSeparator = year + '[./\\-]0?' + month + '[./\\-]0?' + day;
-  var withoutSeparator = year + month2 + day2;
-  // 日付部分は非キャプチャグループ(?:...)にする。stripRedundantDatePrefix_が
-  // '$1$2'（前後の境界2グループ）で置換する前提のため、グループ番号をずらさない。
-  var pattern = '(^|\\D)(?:' + withSeparator + '|' + withoutSeparator + ')(\\D|$)';
-  return new RegExp(pattern);
 }
