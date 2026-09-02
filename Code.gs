@@ -131,7 +131,7 @@ function importFromLinks() {
 
     var displayLabel = url;
     try {
-      var sourceSs = SpreadsheetApp.openById(extractSpreadsheetId_(url));
+      var sourceSs = resolveLinkedSpreadsheet_(url);
       displayLabel = sourceSs.getName();
       var parsed = extractDateAndCompanyFromFileName_(displayLabel);
 
@@ -601,4 +601,26 @@ function extractSpreadsheetId_(input) {
     return match[1];
   }
   return text;
+}
+
+/**
+ * 「案件リンク一覧」のA列の値からスプレッドシートを取得する。URL・IDに加えて、
+ * リンクの代わりにファイル名がそのまま貼られてしまった場合の救済策として、
+ * Drive内をそのファイル名で検索して開くこともできる。
+ */
+function resolveLinkedSpreadsheet_(input) {
+  var id = extractSpreadsheetId_(input);
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(id)) {
+    return SpreadsheetApp.openById(id);
+  }
+
+  var name = String(input).trim();
+  var iterator = DriveApp.getFilesByName(name);
+  while (iterator.hasNext()) {
+    var file = iterator.next();
+    if (file.getMimeType() === MimeType.GOOGLE_SHEETS) {
+      return SpreadsheetApp.open(file);
+    }
+  }
+  throw new Error('URL・IDとして認識できず、ファイル名でも見つかりませんでした');
 }
