@@ -54,7 +54,8 @@ function onOpen() {
 // ============================================================
 
 var LINKS_SHEET_NAME = '案件リンク一覧';
-var CASE_MENU_FONT_SIZE = 14; // 案件タブの「メニュー名」「数量」列のデータ行だけ適用するフォントサイズ
+var CASE_MENU_NAME_FONT_SIZE = 13; // 案件タブの「メニュー名」列のデータ行に適用するフォントサイズ
+var CASE_QTY_FONT_SIZE = 14;       // 案件タブの「数量」列のデータ行に適用するフォントサイズ
 
 /**
  * 「案件リンク一覧」シートを取得する。無ければ見出し付きで新規作成し、
@@ -205,9 +206,9 @@ function extractDateAndCompanyFromFileName_(fileName) {
 
 /** ファイル名から前後の【】/[]などの記号を取り除く。 */
 function cleanCompanyText_(text) {
-  var cleaned = String(text).trim();
-  cleaned = cleaned.replace(/^[【\[]\s*/, '').replace(/[】\]]\s*/, ' ').trim();
-  return cleaned || String(text).trim();
+  var original = String(text).trim();
+  var cleaned = original.replace(/^[【\[]\s*/, '').replace(/[】\]]\s*/, ' ').trim();
+  return cleaned || original;
 }
 
 /**
@@ -215,12 +216,15 @@ function cleanCompanyText_(text) {
  * 前回までの案件タブを一掃してから作り直すことで、タブが際限なく増え続けるのを防ぐ。
  */
 function deleteAllCaseSheets_(ss) {
-  ss.getSheets().forEach(function (sheet) {
+  var sheets = ss.getSheets();
+  var remaining = sheets.length;
+  sheets.forEach(function (sheet) {
     if (sheet.getName() === CONFIG_SHEET_NAME || sheet.getName() === LINKS_SHEET_NAME) {
       return;
     }
-    if (ss.getSheets().length > 1) {
+    if (remaining > 1) {
       ss.deleteSheet(sheet);
+      remaining--;
     }
   });
 }
@@ -240,8 +244,8 @@ function applyCaseMenuFontSize_(sheet, values) {
   if (numDataRows <= 0) {
     return;
   }
-  setColumnFontSize_(sheet, menuHeader.colsByLabel['メニュー名'], dataStartRow1, numDataRows, CASE_MENU_FONT_SIZE);
-  setColumnFontSize_(sheet, menuHeader.colsByLabel['数量'], dataStartRow1, numDataRows, CASE_MENU_FONT_SIZE);
+  setColumnFontSize_(sheet, menuHeader.colsByLabel['メニュー名'], dataStartRow1, numDataRows, CASE_MENU_NAME_FONT_SIZE);
+  setColumnFontSize_(sheet, menuHeader.colsByLabel['数量'], dataStartRow1, numDataRows, CASE_QTY_FONT_SIZE);
 }
 
 function setColumnFontSize_(sheet, colIndex, startRow1, numRows, fontSize) {
@@ -389,9 +393,11 @@ function getOrCreateLabelSpreadsheet_(ss, configSheet) {
  */
 function removeStaleLabelSheets_(labelSs, currentCaseNames) {
   var sheets = labelSs.getSheets();
+  var remaining = sheets.length;
   sheets.forEach(function (sheet) {
-    if (currentCaseNames.indexOf(sheet.getName()) === -1 && labelSs.getSheets().length > 1) {
+    if (currentCaseNames.indexOf(sheet.getName()) === -1 && remaining > 1) {
       labelSs.deleteSheet(sheet);
+      remaining--;
     }
   });
 }
@@ -614,8 +620,8 @@ function resolveLinkedSpreadsheet_(input) {
     return SpreadsheetApp.openById(id);
   }
 
-  var name = String(input).trim();
-  var iterator = DriveApp.getFilesByName(name);
+  // URLの形式にもIDの形式にも一致しなかった場合、そのままファイル名として扱う
+  var iterator = DriveApp.getFilesByName(id);
   while (iterator.hasNext()) {
     var file = iterator.next();
     if (file.getMimeType() === MimeType.GOOGLE_SHEETS) {
