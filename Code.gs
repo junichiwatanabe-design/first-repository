@@ -60,8 +60,9 @@ var CASE_QTY_FONT_SIZE = 14;       // 案件タブの「数量」列のデータ
 /**
  * 「案件リンク一覧」シートを取得する。無ければ見出し付きで新規作成し、
  * アラートを出して処理を中断する（getOrCreateConfigSheet_と同じパターン）。
- * A列: URL（手入力）、B列: 案件実施日、C列: 企業名（どちらもimportFromLinksが
- * ファイル名から読み取って自動入力する）。
+ * A列: URL（手入力）、B列: 案件実施日、C列: 企業名、D列: ファイル名
+ * （B〜Dはどれもimportfromlinksが自動入力する。案件実施日・企業名はファイル名
+ * から読み取ったもの、ファイル名はDriveのファイル名そのもの）。
  */
 function getOrCreateLinksSheet_(ss) {
   var sheet = ss.getSheetByName(LINKS_SHEET_NAME);
@@ -73,7 +74,8 @@ function getOrCreateLinksSheet_(ss) {
   sheet.getRange('A1').setValue('案件ファイルのリンク（1行に1件、URLを貼り付け）');
   sheet.getRange('B1').setValue('案件実施日');
   sheet.getRange('C1').setValue('企業名');
-  sheet.getRange('A1:C1').setFontWeight('bold');
+  sheet.getRange('D1').setValue('ファイル名');
+  sheet.getRange('A1:D1').setFontWeight('bold');
 
   SpreadsheetApp.getUi().alert(
     '「' + LINKS_SHEET_NAME + '」シートを作成しました。' +
@@ -85,9 +87,9 @@ function getOrCreateLinksSheet_(ss) {
 /**
  * メニュー「日次データ取込」→「リンクから読込」から呼び出されるメイン関数。
  * 「案件リンク一覧」のA列に貼られたURLを1件ずつ開き、リンク先ファイルの名前
- * （Driveのファイル名）から案件実施日・企業名を読み取って同じ行のB・C列に
- * 表示するとともに、「案件実施日 + 企業名」で名前をつけた案件タブを作成し、
- * 「設定」シートB1で指定したタブ名の内容をそのままコピーする。
+ * （Driveのファイル名）を同じ行のD列に、そのファイル名から読み取った案件実施日・
+ * 企業名をB・C列に表示するとともに、「案件実施日 + 企業名」で名前をつけた
+ * 案件タブを作成し、「設定」シートB1で指定したタブ名の内容をそのままコピーする。
  * 実行のたびに前回までの案件タブは全て削除してから作り直す
  * （deleteAllCaseSheets_。案件タブが際限なく増え続けるのを防ぐ）。
  */
@@ -124,7 +126,7 @@ function importFromLinks() {
   var allWarnings = [];
   urls.forEach(function (url, i) {
     var rowNum = i + 2;
-    var infoRange = linksSheet.getRange(rowNum, 2, 1, 2);
+    var infoRange = linksSheet.getRange(rowNum, 2, 1, 3); // B:D（案件実施日・企業名・ファイル名）
     if (!url) {
       infoRange.setValue('');
       return;
@@ -136,16 +138,19 @@ function importFromLinks() {
       displayLabel = sourceSs.getName();
       var parsed = extractDateAndCompanyFromFileName_(displayLabel);
 
+      // ファイル自体は開けたので、タブが見つからない場合でも診断用にファイル名は表示する
+      linksSheet.getRange(rowNum, 4).setValue(displayLabel);
+
       var sourceSheet = sourceSs.getSheetByName(tabName);
       if (!sourceSheet) {
         allWarnings.push(displayLabel + ' : タブ「' + tabName + '」が見つかりません');
-        infoRange.setValue('');
+        linksSheet.getRange(rowNum, 2, 1, 2).setValue(''); // B:Cのみクリア
         return;
       }
       var values = sourceSheet.getDataRange().getValues();
       if (values.length === 0) {
         allWarnings.push(displayLabel + ' : データがありません');
-        infoRange.setValue('');
+        linksSheet.getRange(rowNum, 2, 1, 2).setValue(''); // B:Cのみクリア
         return;
       }
 
