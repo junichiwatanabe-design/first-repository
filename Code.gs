@@ -595,10 +595,15 @@ function findCellByValue_(values, targetText) {
   return null;
 }
 
-/** スプレッドシートのURLまたは素のIDから、スプレッドシートIDを取り出す。 */
+/**
+ * スプレッドシートのURLまたは素のIDから、スプレッドシートIDを取り出す。
+ * `.../spreadsheets/d/<ID>/edit`・`.../file/d/<ID>/view`・
+ * `drive.google.com/open?id=<ID>` のいずれの形式にも対応する。
+ */
 function extractSpreadsheetId_(input) {
   var text = String(input).trim();
-  var match = text.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  var match = text.match(/\/(?:spreadsheets|file)\/d\/([a-zA-Z0-9_-]+)/) ||
+    text.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (match) {
     return match[1];
   }

@@ -39,6 +39,8 @@ Google Apps Script（GAS）プロジェクト。
 1. 初回実行時、自動的に「案件リンク一覧」という名前のシートが作成される
    （作成直後は入力を促すアラートが出て処理は中断するので、A列2行目以降に
    案件ファイルのURLを1行に1件貼り付けてから再度実行する）
+   - URLは `docs.google.com/spreadsheets/d/<ID>/edit`・`drive.google.com/file/d/<ID>/view`・
+     `drive.google.com/open?id=<ID>` のいずれの形式でも認識する（`extractSpreadsheetId_`）
    - URL・スプレッドシートIDに加えて、**リンクの代わりにファイル名をそのまま
      貼ってしまった場合**もDrive内をそのファイル名で検索して開く救済策がある
      （`resolveLinkedSpreadsheet_`）。ただし同名ファイルが複数ある場合は最初に
