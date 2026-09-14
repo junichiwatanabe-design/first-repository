@@ -286,9 +286,9 @@ var MM_TO_PX = 96 / 25.4;
 // ラベル1枚（実寸33.9mm、96dpi換算で128px）を3段に分ける。
 // セル内改行では段ごとに異なる書式（数量だけ中央寄せ等）を付けられないため、
 // 「日付＋企業名／メニュー名／数量」を別々のセル（3段）にしている。
-// 内訳は34px/44px/50px（元は34/38/56pxだったが、数量段を6px減らしメニュー名段に
-// 6px足した。合計128pxは変わらないためラベル1枚の実寸33.9mmは維持される）
-var LABEL_SUBROW_HEIGHTS_PX = [34, 44, 50];
+// 内訳は34px/46px/48px（メニュー名を2行に折り返すため、数量段を2px減らして
+// メニュー名段に2px足した。合計128pxは変わらないためラベル1枚の実寸33.9mmは維持される）
+var LABEL_SUBROW_HEIGHTS_PX = [34, 46, 48];
 var LABEL_SUBROWS = LABEL_SUBROW_HEIGHTS_PX.length;
 
 var LABEL_FONT_SIZE = 14;      // 1段目（日付＋企業名）のフォントサイズ
@@ -527,12 +527,13 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
 
 /**
  * ラベル1件分（3段）を書き込む。
- *   1段目: 日付＋企業名（左寄せ）
+ *   1段目: 日付＋企業名（左寄せ、WrapStrategy.CLIP＝折り返さず高さ固定）
  *   2段目: メニュー名（左寄せ・1段目より2pt小さいフォント。中央寄せだと
- *          はみ出した際に先頭が見えず分かりにくいため左寄せにしている）
- *   3段目: 数量（中央寄せ・太字・大きめフォントで強調）
- * 3段とも WrapStrategy.CLIP のため、行の高さは常に固定（データの長さに応じて
- * 自動で広がらない）。はみ出した分は非表示になる。
+ *          はみ出した際に先頭が見えず分かりにくいため左寄せにしている。
+ *          WrapStrategy.WRAP＝2行まで折り返す。全角30文字
+ *          （LABEL_MENU_MAX_ZENKAKU_LEN）を超える分は事前に切り捨てているため、
+ *          2行に収まりきらず段の高さが崩れることを防いでいる）
+ *   3段目: 数量（中央寄せ・太字・大きめフォントで強調、WrapStrategy.CLIP）
  */
 function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
   sheet.getRange(rowBase + 1, col1).setValue(entry.date + ' ' + entry.company)
@@ -547,7 +548,7 @@ function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
     .setFontWeight('bold')
     .setHorizontalAlignment('left')
     .setVerticalAlignment('middle')
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
 
   sheet.getRange(rowBase + 3, col1).setValue(entry.qty)
     .setFontSize(LABEL_QTY_FONT_SIZE)
