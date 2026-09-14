@@ -159,9 +159,21 @@ function importFromLinks() {
       newSheet.setName(newSheetName);
 
       // copyTo() は数式（他シート参照など）もそのままコピーしてしまい、集計先で
-      // 参照が切れて #REF! 等のエラーになることがある。コピー前に評価済みの値
-      // （values）で上書きし、セルの中身を確定値にする（書式は変えない）。
-      newSheet.getRange(1, 1, values.length, values[0].length).setValues(values);
+      // 参照が切れて #REF! 等のエラーになることがある。数式が入っているセルだけを
+      // 評価済みの値（values）で上書きし、確定値にする（書式は変えない）。
+      // 数式が入っていないセル（時刻・日付など通常の入力値）は上書きしない。
+      // getValues()+setValues()はAppsScriptが値をいったんDateオブジェクトに
+      // 変換してから書き込み先のタイムゾーンで解釈し直すため、リンク元と
+      // 集計用スプレッドシートのタイムゾーンが異なると時刻がズレてしまう。
+      // 数式セル以外には触れないことでこのズレを避ける。
+      var formulas = sourceSheet.getRange(1, 1, values.length, values[0].length).getFormulas();
+      for (var r = 0; r < values.length; r++) {
+        for (var c = 0; c < values[0].length; c++) {
+          if (formulas[r][c]) {
+            newSheet.getRange(r + 1, c + 1).setValue(values[r][c]);
+          }
+        }
+      }
 
       applyCaseMenuFontSize_(newSheet, values);
       createdDisplayNames.push(newSheetName);
