@@ -294,6 +294,7 @@ var LABEL_SUBROWS = LABEL_SUBROW_HEIGHTS_PX.length;
 var LABEL_FONT_SIZE = 14;      // 1段目（日付＋企業名）のフォントサイズ
 var LABEL_MENU_FONT_SIZE = 12; // 2段目（メニュー名）。1段目より2pt小さい
 var LABEL_QTY_FONT_SIZE = 28;  // 3段目（数量）。太字・大きめフォントで強調する
+var LABEL_MENU_MAX_ZENKAKU_LEN = 30; // 2段目（メニュー名）は全角換算でこの文字数を超えたら切り捨てる
 
 /**
  * メニュー「日次データ取込」→「ラベル作成」から呼び出されるメイン関数。
@@ -534,14 +535,14 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
  * 自動で広がらない）。はみ出した分は非表示になる。
  */
 function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
-  sheet.getRange(rowBase + 1, col1).setValue(entry.date + '　' + entry.company)
+  sheet.getRange(rowBase + 1, col1).setValue(entry.date + ' ' + entry.company)
     .setFontSize(LABEL_FONT_SIZE)
     .setFontWeight('bold')
     .setHorizontalAlignment('left')
     .setVerticalAlignment('bottom')
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
 
-  sheet.getRange(rowBase + 2, col1).setValue(entry.menu)
+  sheet.getRange(rowBase + 2, col1).setValue(truncateByZenkakuWidth_(entry.menu, LABEL_MENU_MAX_ZENKAKU_LEN))
     .setFontSize(LABEL_MENU_FONT_SIZE)
     .setFontWeight('bold')
     .setHorizontalAlignment('left')
@@ -554,6 +555,31 @@ function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
     .setHorizontalAlignment('center')
     .setVerticalAlignment('middle')
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+}
+
+/**
+ * 文字列を全角換算で指定した文字数までに切り詰める（半角文字は0.5文字分として
+ * カウントする）。超えた分は末尾を単純に切り捨てる（省略記号は付けない）。
+ */
+function truncateByZenkakuWidth_(text, maxZenkakuWidth) {
+  var result = '';
+  var width = 0;
+  for (var i = 0; i < text.length; i++) {
+    var ch = text.charAt(i);
+    var charWidth = isHalfWidthChar_(ch) ? 0.5 : 1;
+    if (width + charWidth > maxZenkakuWidth) {
+      break;
+    }
+    result += ch;
+    width += charWidth;
+  }
+  return result;
+}
+
+/** 半角英数・記号（U+0000〜U+00FF）、半角カタカナ（U+FF61〜U+FF9F）を半角とみなす。 */
+function isHalfWidthChar_(ch) {
+  var code = ch.charCodeAt(0);
+  return (code >= 0x0000 && code <= 0x00FF) || (code >= 0xFF61 && code <= 0xFF9F);
 }
 
 // ============================================================
