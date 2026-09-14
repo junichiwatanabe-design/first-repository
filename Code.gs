@@ -528,8 +528,7 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
 /**
  * ラベル1件分（3段）を書き込む。
  *   1段目: 日付＋企業名（左寄せ、WrapStrategy.CLIP＝折り返さず高さ固定）
- *   2段目: メニュー名（左寄せ・1段目より2pt小さいフォント。中央寄せだと
- *          はみ出した際に先頭が見えず分かりにくいため左寄せにしている。
+ *   2段目: メニュー名（中央寄せ・1段目より2pt小さいフォント。
  *          WrapStrategy.WRAP＝2行まで折り返す。全角30文字
  *          （LABEL_MENU_MAX_ZENKAKU_LEN）を超える分は事前に切り捨てているため、
  *          2行に収まりきらず段の高さが崩れることを防いでいる）
@@ -546,7 +545,7 @@ function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
   sheet.getRange(rowBase + 2, col1).setValue(truncateByZenkakuWidth_(entry.menu, LABEL_MENU_MAX_ZENKAKU_LEN))
     .setFontSize(LABEL_MENU_FONT_SIZE)
     .setFontWeight('bold')
-    .setHorizontalAlignment('left')
+    .setHorizontalAlignment('center')
     .setVerticalAlignment('middle')
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
 
