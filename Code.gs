@@ -157,23 +157,7 @@ function importFromLinks() {
       // getValues()+setValues() ではなく copyTo() でシートごと複製する。
       var newSheet = sourceSheet.copyTo(ss);
       newSheet.setName(newSheetName);
-
-      // copyTo() は数式（他シート参照など）もそのままコピーしてしまい、集計先で
-      // 参照が切れて #REF! 等のエラーになることがある。数式が入っているセルだけを
-      // 評価済みの値（values）で上書きし、確定値にする（書式は変えない）。
-      // 数式が入っていないセル（時刻・日付など通常の入力値）は上書きしない。
-      // getValues()+setValues()はAppsScriptが値をいったんDateオブジェクトに
-      // 変換してから書き込み先のタイムゾーンで解釈し直すため、リンク元と
-      // 集計用スプレッドシートのタイムゾーンが異なると時刻がズレてしまう。
-      // 数式セル以外には触れないことでこのズレを避ける。
-      var formulas = sourceSheet.getRange(1, 1, values.length, values[0].length).getFormulas();
-      for (var r = 0; r < values.length; r++) {
-        for (var c = 0; c < values[0].length; c++) {
-          if (formulas[r][c]) {
-            newSheet.getRange(r + 1, c + 1).setValue(values[r][c]);
-          }
-        }
-      }
+      copyEvaluatedFormulaCells_(sourceSheet, newSheet, values);
 
       applyCaseMenuFontSize_(newSheet, values);
       createdDisplayNames.push(newSheetName);
@@ -189,6 +173,28 @@ function importFromLinks() {
   // 警告・エラーは通常の結果に埋もれて見落とされないよう、別ダイアログで目立たせて表示する
   if (allWarnings.length > 0) {
     ui.alert('⚠️要確認', allWarnings.join('\n'), ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * copyTo()でコピーされたシートのうち、数式が入っていたセルだけを評価済みの値
+ * （values）で上書きする。copyTo()は数式（他シート参照など）もそのままコピー
+ * してしまい、コピー先で参照が切れて #REF! 等のエラーになることがあるため。
+ *
+ * 数式が入っていないセル（時刻・日付など通常の入力値）には触れない。全セルを
+ * 評価済みの値で上書きすると、Apps Scriptが値をいったんDateオブジェクトに
+ * 変換してから書き込み先のタイムゾーンで解釈し直すため、コピー元とコピー先の
+ * タイムゾーン設定が異なる場合に時刻がズレてしまう。数式セル以外を触らない
+ * ことでこのズレを避ける。
+ */
+function copyEvaluatedFormulaCells_(sourceSheet, targetSheet, values) {
+  var formulas = sourceSheet.getRange(1, 1, values.length, values[0].length).getFormulas();
+  for (var r = 0; r < values.length; r++) {
+    for (var c = 0; c < values[0].length; c++) {
+      if (formulas[r][c]) {
+        targetSheet.getRange(r + 1, c + 1).setValue(values[r][c]);
+      }
+    }
   }
 }
 
@@ -224,16 +230,8 @@ function cleanCompanyText_(text) {
  * 前回までの案件タブを一掃してから作り直すことで、タブが際限なく増え続けるのを防ぐ。
  */
 function deleteAllCaseSheets_(ss) {
-  var sheets = ss.getSheets();
-  var remaining = sheets.length;
-  sheets.forEach(function (sheet) {
-    if (sheet.getName() === CONFIG_SHEET_NAME || sheet.getName() === LINKS_SHEET_NAME) {
-      return;
-    }
-    if (remaining > 1) {
-      ss.deleteSheet(sheet);
-      remaining--;
-    }
+  deleteSheetsWhere_(ss, function (sheet) {
+    return sheet.getName() !== CONFIG_SHEET_NAME && sheet.getName() !== LINKS_SHEET_NAME;
   });
 }
 
@@ -401,13 +399,8 @@ function getOrCreateLabelSpreadsheet_(ss, configSheet) {
  * （案件が削除・再作成された場合に古いラベルタブが残らないようにする）。
  */
 function removeStaleLabelSheets_(labelSs, currentCaseNames) {
-  var sheets = labelSs.getSheets();
-  var remaining = sheets.length;
-  sheets.forEach(function (sheet) {
-    if (currentCaseNames.indexOf(sheet.getName()) === -1 && remaining > 1) {
-      labelSs.deleteSheet(sheet);
-      remaining--;
-    }
+  deleteSheetsWhere_(labelSs, function (sheet) {
+    return currentCaseNames.indexOf(sheet.getName()) === -1;
   });
 }
 
@@ -597,6 +590,21 @@ function isHalfWidthChar_(ch) {
 // ============================================================
 // 4. 共通ヘルパー
 // ============================================================
+
+/**
+ * spreadsheet内のシートのうち、shouldDelete(sheet)がtrueを返すものを削除する。
+ * ただし最低1枚はシートを残す（スプレッドシートは全シート削除できないため）。
+ */
+function deleteSheetsWhere_(spreadsheet, shouldDelete) {
+  var sheets = spreadsheet.getSheets();
+  var remaining = sheets.length;
+  sheets.forEach(function (sheet) {
+    if (shouldDelete(sheet) && remaining > 1) {
+      spreadsheet.deleteSheet(sheet);
+      remaining--;
+    }
+  });
+}
 
 /**
  * 値の2次元配列からメニュー表のヘッダー行（「メニュー名」を含む行）を探し、
