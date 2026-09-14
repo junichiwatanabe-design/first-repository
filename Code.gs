@@ -469,14 +469,19 @@ function normalizeDateText_(text) {
  * 1案件分の entries を3列×8行（1件＝3段のセル）のグリッドに配置し、labelSs内の
  * 同名タブへ書き込む。1エントリにつき縦2行（2枚）を使い、24枚（12エントリ）ごとに
  * 次の8行ブロック＝次ページへ折り返す。
- * 既に同名タブがあれば削除してから作り直すため、再実行しても古い内容が残らない。
+ * 既に同名タブがあれば中身だけ消して再利用するため、再実行しても古い内容は
+ * 残らない（タブ自体を削除しないのは、印刷余白などタブに紐づく設定を
+ * 失わないようにするため）。
  */
 function writeLabelSheetForCase_(labelSs, caseName, entries) {
-  var existing = labelSs.getSheetByName(caseName);
-  if (existing) {
-    labelSs.deleteSheet(existing);
+  // 削除して作り直すと、印刷余白などタブに紐づく設定が失われる可能性があるため、
+  // 既存タブがあれば中身だけ消して（clear）再利用する。
+  var sheet = labelSs.getSheetByName(caseName);
+  if (sheet) {
+    sheet.clear();
+  } else {
+    sheet = labelSs.insertSheet(caseName);
   }
-  var sheet = labelSs.insertSheet(caseName);
 
   var entriesPerColumn = Math.floor(LABEL_ROWS / LABEL_COPIES_PER_ENTRY);
   var entriesPerPage = entriesPerColumn * LABEL_COLS;
