@@ -171,8 +171,8 @@ function importFromLinks() {
     }
   });
 
-  ui.alert('リンク読込 結果', createdDisplayNames.length + '件の案件を読み込みました（' +
-    createdDisplayNames.join(' / ') + '）', ui.ButtonSet.OK);
+  ui.alert('リンク読込 結果', createdDisplayNames.length + '件の案件を読み込みました。\n' +
+    createdDisplayNames.join('\n'), ui.ButtonSet.OK);
 
   // 警告・エラーは通常の結果に埋もれて見落とされないよう、別ダイアログで目立たせて表示する
   if (allWarnings.length > 0) {
