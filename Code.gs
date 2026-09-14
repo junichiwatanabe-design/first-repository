@@ -489,12 +489,14 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
   var totalRows = totalPages * LABEL_ROWS * LABEL_SUBROWS;
 
   // 最終ページで3列目が1件も埋まらないと、その列が空のままになり印刷範囲が
-  // 2列分に縮んで中央寄せがずれてしまう。先に全セルへ空文字列の値を入れておくことで
-  // 3列とも印刷範囲に含まれるようにする（実データは後段の書き込みで上書きされる）
+  // 2列分に縮んで中央寄せがずれてしまう。先に全セルへ空文字列の値を入れておくことに加え、
+  // 薄い罫線も引いておくことで、3列とも「データがある列」として印刷範囲に確実に
+  // 含まれるようにする（実データは後段の書き込みで上書きされる）
   sheet.getRange(1, 1, totalRows, LABEL_COLS)
     .setValue('')
     .setFontSize(LABEL_FONT_SIZE)
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP)
+    .setBorder(true, true, true, true, true, true, '#f2f2f2', SpreadsheetApp.BorderStyle.SOLID);
 
   var index = 0;
   for (var page = 0; page < totalPages; page++) {
