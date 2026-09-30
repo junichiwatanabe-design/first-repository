@@ -218,21 +218,37 @@ function importFromLinks() {
 }
 
 /**
- * copyTo()でコピーされたシートのうち、数式が入っていたセルだけを評価済みの値
- * （values）で上書きする。copyTo()は数式（他シート参照など）もそのままコピー
- * してしまい、コピー先で参照が切れて #REF! 等のエラーになることがあるため。
+ * copyTo()でコピーされたシートのうち、(a) 数式が入っていたセルと、(b) コピー後に
+ * 空欄になってしまっているのに元シートでは値があったセルを、評価済みの値
+ * （values）で上書きする。
  *
- * 数式が入っていないセル（時刻・日付など通常の入力値）には触れない。全セルを
- * 評価済みの値で上書きすると、Apps Scriptが値をいったんDateオブジェクトに
- * 変換してから書き込み先のタイムゾーンで解釈し直すため、コピー元とコピー先の
- * タイムゾーン設定が異なる場合に時刻がズレてしまう。数式セル以外を触らない
- * ことでこのズレを避ける。
+ * (a) は、copyTo()が数式（他シート参照など）もそのままコピーしてしまい、
+ * コピー先で参照が切れて #REF! 等のエラーになることを防ぐため。
+ * (b) は、IMPORTRANGE・QUERY・ARRAYFORMULAなど1つのセルの数式が周囲の
+ * セルへ結果を展開する（スピルする）形式の場合、Apps Scriptの
+ * getFormulas()では展開先のセルは「数式なし」として扱われ、copyTo()でも
+ * 展開先セル自体には値が複製されない（数式の実体は先頭セルにしかないため）。
+ * その結果、(a)の条件だけでは展開範囲のほとんどが空欄のままコピーされてしまう。
+ * 元シートでは値があった（＝スピル結果を含む）のにコピー後は空欄、という
+ * セルだけを補完することで、この抜け漏れを埋める。
+ *
+ * それ以外の、数式もなくコピー後も空欄でないセル（時刻・日付など通常の入力値）
+ * には触れない。全セルを評価済みの値で上書きすると、Apps Scriptが値をいったん
+ * Dateオブジェクトに変換してから書き込み先のタイムゾーンで解釈し直すため、
+ * コピー元とコピー先のタイムゾーン設定が異なる場合に時刻がズレてしまう。
+ * 触る必要のないセルには触れないことでこのズレを避ける。
  */
 function copyEvaluatedFormulaCells_(sourceSheet, targetSheet, values) {
-  var formulas = sourceSheet.getRange(1, 1, values.length, values[0].length).getFormulas();
-  for (var r = 0; r < values.length; r++) {
-    for (var c = 0; c < values[0].length; c++) {
-      if (formulas[r][c]) {
+  var numRows = values.length;
+  var numCols = values[0].length;
+  var formulas = sourceSheet.getRange(1, 1, numRows, numCols).getFormulas();
+  var copiedValues = targetSheet.getRange(1, 1, numRows, numCols).getValues();
+  for (var r = 0; r < numRows; r++) {
+    for (var c = 0; c < numCols; c++) {
+      var hasFormula = !!formulas[r][c];
+      var copiedIsBlank = copiedValues[r][c] === '' || copiedValues[r][c] == null;
+      var sourceHasValue = values[r][c] !== '' && values[r][c] != null;
+      if (hasFormula || (copiedIsBlank && sourceHasValue)) {
         targetSheet.getRange(r + 1, c + 1).setValue(values[r][c]);
       }
     }
