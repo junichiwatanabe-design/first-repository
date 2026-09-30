@@ -346,7 +346,7 @@ var LABEL_SPREADSHEET_SUFFIX = '（ラベル印刷）';
 // 面付け（A-one マルチプリンタ用ラベルシール24面: 66mm×33.9mm、3列×8行）
 var LABEL_COLS = 3;
 var LABEL_ROWS = 8;
-var LABEL_COPIES_PER_ENTRY = 2; // 同一ラベルを縦に2枚配置
+var LABEL_COPIES_PER_ENTRY = 1; // 1件につき1枚配置
 var LABEL_COL_WIDTH_MM = 66;    // ラベル1枚の実寸幅。商品が異なる場合は要調整
 var MM_TO_PX = 96 / 25.4;
 
@@ -530,7 +530,7 @@ function normalizeDateText_(text) {
 
 /**
  * 1案件分の entries を3列×8行（1件＝3段のセル）のグリッドに配置し、labelSs内の
- * 同名タブへ書き込む。1エントリにつき縦2行（2枚）を使い、24枚（12エントリ）ごとに
+ * 同名タブへ書き込む。1エントリにつき1枚を配置し、24枚（24エントリ）ごとに
  * 次の8行ブロック＝次ページへ折り返す。
  * 既に同名タブがあれば中身だけ消して再利用するため、再実行しても古い内容は
  * 残らない（タブ自体を削除しないのは、印刷余白などタブに紐づく設定を

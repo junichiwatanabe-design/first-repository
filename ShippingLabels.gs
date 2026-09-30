@@ -11,8 +11,9 @@
  *   - 項目表: E列=メニュー名（新しい品目の先頭行にしか入らない。以降はforward-fillで
  *     引き継ぐ）、G列=梱包メモ等（見出しなし）、I列=数量、J列=場所
  * 項目表のうち数量・場所のどちらかに値がある行を1件のラベルとして集計し、
- * 既存プロジェクトと同じA-oneラベルシール（24面・66mm×33.9mm・3列×8行）に
- * 印刷できる形式でラベル専用スプレッドシートへ出力する。
+ * A-oneラベルシール18面相当（66mm×45.2mm・3列×6行。既存プロジェクトの
+ * 24面版66mm×33.9mmと同じ総高さを6行で割った寸法）に印刷できる形式で
+ * ラベル専用スプレッドシートへ出力する。
  *
  * ファイル構成:
  *   1. 設定シート関連
@@ -93,7 +94,10 @@ function collectShippingEntries_(sheet) {
       continue;
     }
     var note = String(values[i][SHIP_ITEM_NOTE_COL] || '').trim();
-    entries.push({ menu: currentMenu, note: note, qty: qty, place: place });
+    entries.push({
+      shipDate: shipDate, provideLine: provideLine,
+      menu: currentMenu, note: note, qty: qty, place: place
+    });
   }
 
   return { shipDate: shipDate, provideLine: provideLine, entries: entries };
@@ -105,20 +109,26 @@ function collectShippingEntries_(sheet) {
 
 var SHIP_LABEL_SPREADSHEET_SUFFIX = '（出荷ラベル印刷）';
 
-// 面付け（A-one マルチプリンタ用ラベルシール24面: 66mm×33.9mm、3列×8行）
+// 面付け（A-one マルチプリンタ用ラベルシール18面相当: 66mm×45.2mm、3列×6行。
+// 24面版（66mm×33.9mm、3列×8行）の総高さ271.2mmは変えず、8行ではなく6行で
+// 均等に割った高さにしている。1段目が3行になったことで従来の33.9mmでは
+// 収まらなくなったため）
 var SHIP_LABEL_COLS = 3;
-var SHIP_LABEL_ROWS = 8;
+var SHIP_LABEL_ROWS = 6;
 var SHIP_LABEL_COPIES_PER_ENTRY = 1; // 1件につき1枚（必要ならここを増やす）
 var SHIP_LABEL_COL_WIDTH_MM = 66;
 var SHIP_MM_TO_PX = 96 / 25.4;
 
-// ラベル1枚（実寸33.9mm、96dpi換算で128px）を3段に分ける。Code.gsと同じ内訳から開始する。
-var SHIP_LABEL_SUBROW_HEIGHTS_PX = [34, 48, 46];
+// ラベル1枚（実寸45.2mm、96dpi換算で171px）を3段に分ける。
+// 内訳は54px/58px/59px（1段目が出荷日・提供日・場所の3行分必要になったため、
+// Code.gsの34/48/46から全体的に底上げしている）。実際に印刷して3行が窮屈な
+// 場合は、2段目・3段目から少しずつ高さを移して調整する
+var SHIP_LABEL_SUBROW_HEIGHTS_PX = [54, 58, 59];
 var SHIP_LABEL_SUBROWS = SHIP_LABEL_SUBROW_HEIGHTS_PX.length;
 
-var SHIP_LABEL_PLACE_FONT_SIZE = 14; // 1段目（場所）
-var SHIP_LABEL_MENU_FONT_SIZE = 12;  // 2段目（メニュー名＋梱包メモ）
-var SHIP_LABEL_QTY_FONT_SIZE = 28;   // 3段目（数量）
+var SHIP_LABEL_HEADER_FONT_SIZE = 10; // 1段目（出荷日・提供日・場所の3行、共通サイズ）
+var SHIP_LABEL_MENU_FONT_SIZE = 12;   // 2段目（メニュー名＋梱包メモ）
+var SHIP_LABEL_QTY_FONT_SIZE = 28;    // 3段目（数量）
 var SHIP_LABEL_MENU_MAX_ZENKAKU_LEN = 30; // 2段目は全角換算でこの文字数を超えたら切り捨てる
 
 /**
@@ -222,7 +232,7 @@ function removeStaleShipLabelSheets_(labelSs, currentTabNames) {
 }
 
 /**
- * 1タブ分の entries を3列×8行（1件＝3段のセル）のグリッドに配置し、labelSs内の
+ * 1タブ分の entries を3列×6行（1件＝3段のセル）のグリッドに配置し、labelSs内の
  * 同名タブへ書き込む。既に同名タブがあれば中身だけ消して再利用する
  * （印刷余白などタブに紐づく設定が維持される可能性があるため）。
  */
@@ -274,18 +284,21 @@ function writeShipLabelSheetForTab_(labelSs, tabName, entries) {
 
 /**
  * ラベル1件分（3段）を書き込む。
- *   1段目: 場所（左寄せ・太字、WrapStrategy.CLIP＝折り返さず高さ固定）
+ *   1段目: 出荷日・提供日・場所の3行（改行区切りで1セルにまとめる。左寄せ・
+ *          太字・共通フォントサイズ、WrapStrategy.CLIP＝改行文字はそのまま
+ *          改行として表示されるが、1行が長すぎる場合の自動折り返しはしない）
  *   2段目: メニュー名＋梱包メモ（中央寄せ。WrapStrategy.WRAP＝2行まで折り返す。
  *          全角30文字（SHIP_LABEL_MENU_MAX_ZENKAKU_LEN）を超える分は事前に
  *          切り捨てているため、2行に収まりきらず段の高さが崩れることを防いでいる）
  *   3段目: 数量（中央寄せ・太字・大きめフォントで強調、WrapStrategy.CLIP）
  */
 function writeShipLabelCellGroup_(sheet, rowBase, col1, entry) {
-  sheet.getRange(rowBase + 1, col1).setValue(entry.place)
-    .setFontSize(SHIP_LABEL_PLACE_FONT_SIZE)
+  var headerText = '出荷日 ' + entry.shipDate + '\n' + entry.provideLine + '\n' + entry.place;
+  sheet.getRange(rowBase + 1, col1).setValue(headerText)
+    .setFontSize(SHIP_LABEL_HEADER_FONT_SIZE)
     .setFontWeight('bold')
     .setHorizontalAlignment('left')
-    .setVerticalAlignment('bottom')
+    .setVerticalAlignment('top')
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
 
   var menuText = entry.note ? entry.menu + ' ' + entry.note : entry.menu;
