@@ -1,9 +1,8 @@
 /**
- * 「案件リンク一覧」シートに手入力した案件ファイルのURLを1件ずつ開き、
- * ファイル名から案件実施日・企業名を読み取って一覧に表示するとともに、
- * 「設定」シートで指定したタブ名の内容を集計用スプレッドシートへ案件ごとに
- * 別タブとしてコピーする（印刷時に案件単位で改ページされるよう1案件＝1タブの
- * 構成にしている）。
+ * 「設定」シートに手入力した案件ファイルのURLを1件ずつ開き、ファイル名から
+ * 案件実施日・企業名を読み取って一覧に表示するとともに、同じ「設定」シートで
+ * 指定したタブ名の内容を集計用スプレッドシートへ案件ごとに別タブとしてコピー
+ * する（印刷時に案件単位で改ページされるよう1案件＝1タブの構成にしている）。
  *
  * さらに、集計済みの案件タブから日付・企業名・メニュー名・数量を集めて、
  * ラベル専用の別スプレッドシートへ印刷用ラベル（A4・24面）を作成する機能も持つ。
@@ -20,25 +19,83 @@
 // ============================================================
 
 var CONFIG_SHEET_NAME = '設定';
-var CONFIG_TAB_NAME_CELL = 'B1';  // 各ファイル内で読み込む固定タブ名
-var CONFIG_LABEL_SS_CELL = 'B2';  // ラベル出力先スプレッドシートの URL/ID（自動設定）
+var CONFIG_TAB_NAME_CELL = 'B1';          // 各ファイル内で読み込む固定タブ名
+var CONFIG_LABEL_SS_CELL = 'B2';          // ラベル出力先スプレッドシートの URL/ID（自動設定）
+var CONFIG_PRINT_MARGIN_CELL = 'B3';      // 印刷時余白のメモ（スクリプトからは読み書きしない）
+var CONFIG_PRINT_MARGIN_DEFAULT = '上下12mm・左右5mm程度';
+var CONFIG_LINKS_HEADER_ROW = 5;          // 案件ファイルのリンク一覧の見出し行
+var CONFIG_LINKS_DATA_START_ROW = 6;      // 案件ファイルのリンク一覧のデータ開始行
+var LEGACY_LINKS_SHEET_NAME = '案件リンク一覧'; // 旧バージョンで使っていたリンク一覧シート名（あれば「設定」へ自動移行して削除する）
 
+/**
+ * 「設定」シートを取得する。無ければ新規作成し、見出しラベルを設定したうえで
+ * アラートを出して処理を中断する（初回のみ）。既にある場合は、不足している
+ * 見出しラベルだけを補完し（ユーザー入力済みの値は上書きしない）、旧バージョンの
+ * 「案件リンク一覧」シートが残っていれば中身を移行してから削除する。
+ */
 function getOrCreateConfigSheet_(ss) {
   var sheet = ss.getSheetByName(CONFIG_SHEET_NAME);
-  if (sheet) {
-    return sheet;
+  var isNew = !sheet;
+  if (isNew) {
+    sheet = ss.insertSheet(CONFIG_SHEET_NAME);
   }
 
-  sheet = ss.insertSheet(CONFIG_SHEET_NAME);
-  sheet.getRange('A1').setValue('読み込むタブ名');
-  sheet.getRange('A2').setValue('ラベル出力先スプレッドシートID（自動設定・空欄でOK）');
-  sheet.getRange('A1:A2').setFontWeight('bold');
+  fillConfigSheetLabels_(sheet);
+  migrateLegacyLinksSheet_(ss, sheet);
 
-  SpreadsheetApp.getUi().alert(
-    '「' + CONFIG_SHEET_NAME + '」シートを作成しました。' +
-    CONFIG_TAB_NAME_CELL + ' に読み込むタブ名を入力してから再度実行してください。'
-  );
-  return null;
+  if (isNew) {
+    SpreadsheetApp.getUi().alert(
+      '「' + CONFIG_SHEET_NAME + '」シートを作成しました。' +
+      CONFIG_TAB_NAME_CELL + ' に読み込むタブ名を、' + CONFIG_LINKS_HEADER_ROW +
+      '行目以降に案件ファイルのURLを入力してから再度実行してください。'
+    );
+    return null;
+  }
+  return sheet;
+}
+
+/**
+ * 「設定」シートの見出しラベル（A1〜A3・A5・B5）とB3の初期メモ値を補完する。
+ * 既に値が入っているセル（B1・B2・B3・URL一覧など）は上書きしない。
+ */
+function fillConfigSheetLabels_(sheet) {
+  setIfEmpty_(sheet.getRange('A1'), '読み込むタブ名');
+  setIfEmpty_(sheet.getRange('A2'), 'ラベル出力先スプレッドシートID（自動設定・空欄でOK）');
+  setIfEmpty_(sheet.getRange('A3'), '印刷時の余白（メモ・スクリプトでは使用しません）');
+  setIfEmpty_(sheet.getRange(CONFIG_PRINT_MARGIN_CELL), CONFIG_PRINT_MARGIN_DEFAULT);
+  setIfEmpty_(sheet.getRange(CONFIG_LINKS_HEADER_ROW, 1), '案件ファイルのリンク（1行に1件、URLを貼り付け）');
+  setIfEmpty_(sheet.getRange(CONFIG_LINKS_HEADER_ROW, 2), 'ファイル名');
+  sheet.getRange('A1:A3').setFontWeight('bold');
+  sheet.getRange(CONFIG_LINKS_HEADER_ROW, 1, 1, 2).setFontWeight('bold');
+}
+
+function setIfEmpty_(range, value) {
+  if (range.getValue() === '') {
+    range.setValue(value);
+  }
+}
+
+/**
+ * 旧バージョンが使っていた「案件リンク一覧」シートが残っている場合、
+ * そのURL・ファイル名（2行目以降）を「設定」シートの6行目以降へ一度だけ
+ * 移行してから、旧シートを削除する。移行先に既にデータがある場合
+ * （移行済みだが旧シートの削除だけ失敗した場合など）は、コピーを二重に
+ * 行わず削除だけ行う。
+ */
+function migrateLegacyLinksSheet_(ss, configSheet) {
+  var legacySheet = ss.getSheetByName(LEGACY_LINKS_SHEET_NAME);
+  if (!legacySheet) {
+    return;
+  }
+  var alreadyMigrated = configSheet.getRange(CONFIG_LINKS_DATA_START_ROW, 1).getValue() !== '';
+  if (!alreadyMigrated) {
+    var numRows = Math.max(legacySheet.getLastRow() - 1, 0);
+    if (numRows > 0) {
+      var legacyValues = legacySheet.getRange(2, 1, numRows, 2).getValues();
+      configSheet.getRange(CONFIG_LINKS_DATA_START_ROW, 1, numRows, 2).setValues(legacyValues);
+    }
+  }
+  ss.deleteSheet(legacySheet);
 }
 
 function onOpen() {
@@ -53,42 +110,17 @@ function onOpen() {
 // 2. リンクからの案件読み込み
 // ============================================================
 
-var LINKS_SHEET_NAME = '案件リンク一覧';
 var CASE_MENU_NAME_FONT_SIZE = 13; // 案件タブの「メニュー名」列のデータ行に適用するフォントサイズ
 var CASE_QTY_FONT_SIZE = 14;       // 案件タブの「数量」列のデータ行に適用するフォントサイズ
 
 /**
- * 「案件リンク一覧」シートを取得する。無ければ見出し付きで新規作成し、
- * アラートを出して処理を中断する（getOrCreateConfigSheet_と同じパターン）。
- * A列: URL（手入力）、B列: ファイル名（importFromLinksがDriveのファイル名を
- * そのまま自動入力する）。
- */
-function getOrCreateLinksSheet_(ss) {
-  var sheet = ss.getSheetByName(LINKS_SHEET_NAME);
-  if (sheet) {
-    return sheet;
-  }
-
-  sheet = ss.insertSheet(LINKS_SHEET_NAME);
-  sheet.getRange('A1').setValue('案件ファイルのリンク（1行に1件、URLを貼り付け）');
-  sheet.getRange('B1').setValue('ファイル名');
-  sheet.getRange('A1:B1').setFontWeight('bold');
-
-  SpreadsheetApp.getUi().alert(
-    '「' + LINKS_SHEET_NAME + '」シートを作成しました。' +
-    'A列2行目以降に案件ファイルのURLを1行に1件貼り付けてから再度実行してください。'
-  );
-  return null;
-}
-
-/**
  * メニュー「日次データ取込」→「リンクから読込」から呼び出されるメイン関数。
- * 「案件リンク一覧」のA列に貼られたURLを1件ずつ開き、リンク先ファイルの名前
- * （Driveのファイル名）を同じ行のB列に表示するとともに、そのファイル名から
- * 読み取った「案件実施日 + 企業名」で名前をつけた案件タブを作成し、「設定」
- * シートB1で指定したタブ名の内容をそのままコピーする。
- * 実行のたびに前回までの案件タブは全て削除してから作り直す
- * （deleteAllCaseSheets_。案件タブが際限なく増え続けるのを防ぐ）。
+ * 「設定」シートのCONFIG_LINKS_DATA_START_ROW行目以降のA列に貼られたURLを
+ * 1件ずつ開き、リンク先ファイルの名前（Driveのファイル名）を同じ行のB列に
+ * 表示するとともに、そのファイル名から読み取った「案件実施日 + 企業名」で
+ * 名前をつけた案件タブを作成し、「設定」シートB1で指定したタブ名の内容を
+ * そのままコピーする。実行のたびに前回までの案件タブは全て削除してから
+ * 作り直す（deleteAllCaseSheets_。案件タブが際限なく増え続けるのを防ぐ）。
  */
 function importFromLinks() {
   var ui = SpreadsheetApp.getUi();
@@ -103,17 +135,14 @@ function importFromLinks() {
     return;
   }
 
-  var linksSheet = getOrCreateLinksSheet_(ss);
-  if (!linksSheet) {
-    return;
-  }
-  var numRows = Math.max(linksSheet.getLastRow() - 1, 0);
+  var numRows = Math.max(configSheet.getLastRow() - CONFIG_LINKS_DATA_START_ROW + 1, 0);
   if (numRows === 0) {
-    ui.alert('「' + LINKS_SHEET_NAME + '」シートのA列2行目以降にURLを入力してください。');
+    ui.alert('「' + CONFIG_SHEET_NAME + '」シートの' + CONFIG_LINKS_DATA_START_ROW +
+      '行目以降に案件ファイルのURLを入力してください。');
     return;
   }
 
-  var urls = linksSheet.getRange(2, 1, numRows, 1).getValues()
+  var urls = configSheet.getRange(CONFIG_LINKS_DATA_START_ROW, 1, numRows, 1).getValues()
     .map(function (row) { return String(row[0] || '').trim(); });
 
   // 実行のたびに前回までの案件タブをすべて削除してから作り直す
@@ -122,8 +151,8 @@ function importFromLinks() {
   var createdDisplayNames = [];
   var allWarnings = [];
   urls.forEach(function (url, i) {
-    var rowNum = i + 2;
-    var fileNameCell = linksSheet.getRange(rowNum, 2);
+    var rowNum = CONFIG_LINKS_DATA_START_ROW + i;
+    var fileNameCell = configSheet.getRange(rowNum, 2);
     if (!url) {
       fileNameCell.setValue('');
       return;
@@ -226,12 +255,12 @@ function cleanCompanyText_(text) {
 }
 
 /**
- * 「設定」「案件リンク一覧」シートを除く全ての案件タブを削除する。実行のたびに
- * 前回までの案件タブを一掃してから作り直すことで、タブが際限なく増え続けるのを防ぐ。
+ * 「設定」シートを除く全ての案件タブを削除する。実行のたびに前回までの案件タブを
+ * 一掃してから作り直すことで、タブが際限なく増え続けるのを防ぐ。
  */
 function deleteAllCaseSheets_(ss) {
   deleteSheetsWhere_(ss, function (sheet) {
-    return sheet.getName() !== CONFIG_SHEET_NAME && sheet.getName() !== LINKS_SHEET_NAME;
+    return sheet.getName() !== CONFIG_SHEET_NAME;
   });
 }
 
@@ -328,7 +357,7 @@ function createLabels() {
   var warnings = [];
   ss.getSheets().forEach(function (sheet) {
     var name = sheet.getName();
-    if (name === CONFIG_SHEET_NAME || name === LABEL_SHEET_NAME || name === LINKS_SHEET_NAME) {
+    if (name === CONFIG_SHEET_NAME || name === LABEL_SHEET_NAME) {
       return;
     }
     caseSheetNames.push(name);
@@ -664,7 +693,8 @@ function extractSpreadsheetId_(input) {
 }
 
 /**
- * 「案件リンク一覧」のA列の値からスプレッドシートを取得する。URL・IDに加えて、
+ * 「設定」シートのA列（案件ファイルのリンク一覧）の値からスプレッドシートを
+ * 取得する。URL・IDに加えて、
  * リンクの代わりにファイル名がそのまま貼られてしまった場合の救済策として、
  * Drive内をそのファイル名で検索して開くこともできる。
  */
