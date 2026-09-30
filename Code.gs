@@ -1,8 +1,8 @@
 /**
  * 「設定」シートに手入力した案件ファイルのURLを1件ずつ開き、ファイル名から
- * 案件実施日・企業名を読み取って一覧に表示するとともに、同じ「設定」シートで
- * 指定したタブ名の内容を集計用スプレッドシートへ案件ごとに別タブとしてコピー
- * する（印刷時に案件単位で改ページされるよう1案件＝1タブの構成にしている）。
+ * 案件実施日・企業名を読み取って一覧に表示するとともに、リンク先ファイルの
+ * 全タブの内容を集計用スプレッドシートへ案件ごとに別タブとしてコピーする
+ * （印刷時に案件単位で改ページされるよう1案件＝1タブの構成にしている）。
  *
  * さらに、集計済みの案件タブから日付・企業名・メニュー名・数量を集めて、
  * ラベル専用の別スプレッドシートへ印刷用ラベル（A4・24面）を作成する機能も持つ。
@@ -19,25 +19,28 @@
 // ============================================================
 
 var CONFIG_SHEET_NAME = '設定';
-var CONFIG_TAB_NAME_CELL = 'B1';          // 各ファイル内で読み込む固定タブ名
-var CONFIG_LABEL_SS_CELL = 'B2';          // ラベル出力先スプレッドシートの URL/ID（自動設定）
-var CONFIG_PRINT_MARGIN_CELL = 'B3';      // 印刷時余白のメモ（スクリプトからは読み書きしない）
+var CONFIG_LABEL_SS_CELL = 'B1';          // ラベル出力先スプレッドシートの URL/ID（自動設定）
+var CONFIG_PRINT_MARGIN_CELL = 'B2';      // 印刷時余白のメモ（スクリプトからは読み書きしない）
 var CONFIG_PRINT_MARGIN_DEFAULT = '上下12mm・左右5mm程度';
-var CONFIG_LINKS_HEADER_ROW = 5;          // 案件ファイルのリンク一覧の見出し行
-var CONFIG_LINKS_DATA_START_ROW = 6;      // 案件ファイルのリンク一覧のデータ開始行
+var CONFIG_LINKS_HEADER_ROW = 4;          // 案件ファイルのリンク一覧の見出し行
+var CONFIG_LINKS_DATA_START_ROW = 5;      // 案件ファイルのリンク一覧のデータ開始行
 var LEGACY_LINKS_SHEET_NAME = '案件リンク一覧'; // 旧バージョンで使っていたリンク一覧シート名（あれば「設定」へ自動移行して削除する）
+var LEGACY_TAB_NAME_LABEL = '読み込むタブ名'; // 旧バージョンのA1見出し（タブ名を固定指定していた名残。あれば1行目ごと削除して移行する）
 
 /**
  * 「設定」シートを取得する。無ければ新規作成し、見出しラベルを設定したうえで
- * アラートを出して処理を中断する（初回のみ）。既にある場合は、不足している
- * 見出しラベルだけを補完し（ユーザー入力済みの値は上書きしない）、旧バージョンの
- * 「案件リンク一覧」シートが残っていれば中身を移行してから削除する。
+ * アラートを出して処理を中断する（初回のみ）。既にある場合は、旧バージョンの
+ * レイアウト（固定タブ名指定・「案件リンク一覧」シート分離）が残っていれば
+ * 自動移行し、不足している見出しラベルだけを補完する（ユーザー入力済みの値は
+ * 上書きしない）。
  */
 function getOrCreateConfigSheet_(ss) {
   var sheet = ss.getSheetByName(CONFIG_SHEET_NAME);
   var isNew = !sheet;
   if (isNew) {
     sheet = ss.insertSheet(CONFIG_SHEET_NAME);
+  } else {
+    migrateAwayFromTabNameLayout_(sheet);
   }
 
   fillConfigSheetLabels_(sheet);
@@ -45,8 +48,7 @@ function getOrCreateConfigSheet_(ss) {
 
   if (isNew) {
     SpreadsheetApp.getUi().alert(
-      '「' + CONFIG_SHEET_NAME + '」シートを作成しました。' +
-      CONFIG_TAB_NAME_CELL + ' に読み込むタブ名を、' + CONFIG_LINKS_HEADER_ROW +
+      '「' + CONFIG_SHEET_NAME + '」シートを作成しました。' + CONFIG_LINKS_HEADER_ROW +
       '行目以降に案件ファイルのURLを入力してから再度実行してください。'
     );
     return null;
@@ -55,17 +57,16 @@ function getOrCreateConfigSheet_(ss) {
 }
 
 /**
- * 「設定」シートの見出しラベル（A1〜A3・A5・B5）とB3の初期メモ値を補完する。
- * 既に値が入っているセル（B1・B2・B3・URL一覧など）は上書きしない。
+ * 「設定」シートの見出しラベル（A1〜A2・A4・B4）とB2の初期メモ値を補完する。
+ * 既に値が入っているセル（B1・B2・URL一覧など）は上書きしない。
  */
 function fillConfigSheetLabels_(sheet) {
-  setIfEmpty_(sheet.getRange('A1'), '読み込むタブ名');
-  setIfEmpty_(sheet.getRange('A2'), 'ラベル出力先スプレッドシートID（自動設定・空欄でOK）');
-  setIfEmpty_(sheet.getRange('A3'), '印刷時の余白（メモ・スクリプトでは使用しません）');
+  setIfEmpty_(sheet.getRange('A1'), 'ラベル出力先スプレッドシートID（自動設定・空欄でOK）');
+  setIfEmpty_(sheet.getRange('A2'), '印刷時の余白（メモ・スクリプトでは使用しません）');
   setIfEmpty_(sheet.getRange(CONFIG_PRINT_MARGIN_CELL), CONFIG_PRINT_MARGIN_DEFAULT);
   setIfEmpty_(sheet.getRange(CONFIG_LINKS_HEADER_ROW, 1), '案件ファイルのリンク（1行に1件、URLを貼り付け）');
   setIfEmpty_(sheet.getRange(CONFIG_LINKS_HEADER_ROW, 2), 'ファイル名');
-  sheet.getRange('A1:A3').setFontWeight('bold');
+  sheet.getRange('A1:A2').setFontWeight('bold');
   sheet.getRange(CONFIG_LINKS_HEADER_ROW, 1, 1, 2).setFontWeight('bold');
 }
 
@@ -76,10 +77,21 @@ function setIfEmpty_(range, value) {
 }
 
 /**
+ * 旧バージョンでは1行目が「読み込むタブ名」の指定だったが、現在は全タブを
+ * 読み込むためこの指定は不要になった。1行目がその名残であれば行ごと削除し、
+ * 2行目以降（ラベルSS ID・印刷余白メモ・URL一覧）を1行分繰り上げる。
+ */
+function migrateAwayFromTabNameLayout_(sheet) {
+  if (String(sheet.getRange('A1').getValue()).trim() === LEGACY_TAB_NAME_LABEL) {
+    sheet.deleteRow(1);
+  }
+}
+
+/**
  * 旧バージョンが使っていた「案件リンク一覧」シートが残っている場合、
- * そのURL・ファイル名（2行目以降）を「設定」シートの6行目以降へ一度だけ
- * 移行してから、旧シートを削除する。移行先に既にデータがある場合
- * （移行済みだが旧シートの削除だけ失敗した場合など）は、コピーを二重に
+ * そのURL・ファイル名（2行目以降）を「設定」シートのCONFIG_LINKS_DATA_START_ROW
+ * 行目以降へ一度だけ移行してから、旧シートを削除する。移行先に既にデータがある
+ * 場合（移行済みだが旧シートの削除だけ失敗した場合など）は、コピーを二重に
  * 行わず削除だけ行う。
  */
 function migrateLegacyLinksSheet_(ss, configSheet) {
@@ -118,20 +130,16 @@ var CASE_QTY_FONT_SIZE = 14;       // 案件タブの「数量」列のデータ
  * 「設定」シートのCONFIG_LINKS_DATA_START_ROW行目以降のA列に貼られたURLを
  * 1件ずつ開き、リンク先ファイルの名前（Driveのファイル名）を同じ行のB列に
  * 表示するとともに、そのファイル名から読み取った「案件実施日 + 企業名」で
- * 名前をつけた案件タブを作成し、「設定」シートB1で指定したタブ名の内容を
- * そのままコピーする。実行のたびに前回までの案件タブは全て削除してから
- * 作り直す（deleteAllCaseSheets_。案件タブが際限なく増え続けるのを防ぐ）。
+ * 名前をつけた案件タブを、リンク先ファイルの**全タブ**についてそれぞれ作成し、
+ * 内容をそのままコピーする（1ファイルに複数タブある場合はタブ名を付記して
+ * 区別する）。実行のたびに前回までの案件タブは全て削除してから作り直す
+ * （deleteAllCaseSheets_。案件タブが際限なく増え続けるのを防ぐ）。
  */
 function importFromLinks() {
   var ui = SpreadsheetApp.getUi();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var configSheet = getOrCreateConfigSheet_(ss);
   if (!configSheet) {
-    return;
-  }
-  var tabName = configSheet.getRange(CONFIG_TAB_NAME_CELL).getValue();
-  if (!tabName) {
-    ui.alert('設定シートの「' + CONFIG_TAB_NAME_CELL + '」(タブ名) を入力してください。');
     return;
   }
 
@@ -163,33 +171,37 @@ function importFromLinks() {
       var sourceSs = resolveLinkedSpreadsheet_(url);
       displayLabel = sourceSs.getName();
       var parsed = extractDateAndCompanyFromFileName_(displayLabel);
-
-      // ファイル自体は開けたので、タブが見つからない場合でも診断用にファイル名は表示する
       fileNameCell.setValue(displayLabel);
 
-      var sourceSheet = sourceSs.getSheetByName(tabName);
-      if (!sourceSheet) {
-        allWarnings.push(displayLabel + ' : タブ「' + tabName + '」が見つかりません');
-        return;
-      }
-      var values = sourceSheet.getDataRange().getValues();
-      if (values.length === 0) {
-        allWarnings.push(displayLabel + ' : データがありません');
-        return;
-      }
+      var rawBaseName = (parsed.date ? parsed.date + ' ' : '') + parsed.company;
+      var sourceSheets = sourceSs.getSheets();
+      var multipleTabs = sourceSheets.length > 1;
 
-      // 案件タブを作成し、リンク先の内容をそのままコピーする
-      var baseName = sanitizeSheetName_((parsed.date ? parsed.date + ' ' : '') + parsed.company);
-      var newSheetName = uniqueSheetName_(ss, baseName);
+      // リンク先ファイルの全タブを、それぞれ別の案件タブとしてコピーする
+      sourceSheets.forEach(function (sourceSheet) {
+        try {
+          var values = sourceSheet.getDataRange().getValues();
+          if (values.length === 0) {
+            allWarnings.push(displayLabel + '「' + sourceSheet.getName() + '」 : データがありません');
+            return;
+          }
 
-      // 元シートの書式（フォント・背景色・罫線・セル結合・列幅など）を保つため
-      // getValues()+setValues() ではなく copyTo() でシートごと複製する。
-      var newSheet = sourceSheet.copyTo(ss);
-      newSheet.setName(newSheetName);
-      copyEvaluatedFormulaCells_(sourceSheet, newSheet, values);
+          // 1ファイルに複数タブある場合は元のタブ名を付記して区別する
+          var rawName = multipleTabs ? rawBaseName + '（' + sourceSheet.getName() + '）' : rawBaseName;
+          var newSheetName = uniqueSheetName_(ss, sanitizeSheetName_(rawName));
 
-      applyCaseMenuFontSize_(newSheet, values);
-      createdDisplayNames.push(newSheetName);
+          // 元シートの書式（フォント・背景色・罫線・セル結合・列幅など）を保つため
+          // getValues()+setValues() ではなく copyTo() でシートごと複製する。
+          var newSheet = sourceSheet.copyTo(ss);
+          newSheet.setName(newSheetName);
+          copyEvaluatedFormulaCells_(sourceSheet, newSheet, values);
+
+          applyCaseMenuFontSize_(newSheet, values);
+          createdDisplayNames.push(newSheetName);
+        } catch (eTab) {
+          allWarnings.push(displayLabel + '「' + sourceSheet.getName() + '」 : 処理中にエラーが発生しました（' + eTab.message + '）');
+        }
+      });
     } catch (e) {
       allWarnings.push(displayLabel + ' : 処理中にエラーが発生しました（' + e.message + '）');
       fileNameCell.setValue('');
