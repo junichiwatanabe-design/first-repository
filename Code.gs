@@ -22,6 +22,7 @@ var CONFIG_SHEET_NAME = '設定';
 var CONFIG_LABEL_SS_CELL = 'B1';          // ラベル出力先スプレッドシートの URL/ID（自動設定）
 var CONFIG_PRINT_MARGIN_CELL = 'B2';      // 印刷時余白のメモ（スクリプトからは読み書きしない）
 var CONFIG_PRINT_MARGIN_DEFAULT = '上下12mm・左右5mm程度';
+var CONFIG_LABEL_SIZE_CELL = 'B3';        // ラベルシールのサイズ（プルダウンで3×8/3×6を選択）
 var CONFIG_LINKS_HEADER_ROW = 4;          // 案件ファイルのリンク一覧の見出し行
 var CONFIG_LINKS_DATA_START_ROW = 5;      // 案件ファイルのリンク一覧のデータ開始行
 var LEGACY_LINKS_SHEET_NAME = '案件リンク一覧'; // 旧バージョンで使っていたリンク一覧シート名（あれば「設定」へ自動移行して削除する）
@@ -57,16 +58,24 @@ function getOrCreateConfigSheet_(ss) {
 }
 
 /**
- * 「設定」シートの見出しラベル（A1〜A2・A4・B4）とB2の初期メモ値を補完する。
- * 既に値が入っているセル（B1・B2・URL一覧など）は上書きしない。
+ * 「設定」シートの見出しラベル（A1〜A3・A4・B4）とB2・B3の初期値を補完する。
+ * 既に値が入っているセル（B1・B2・B3・URL一覧など）は上書きしない。
  */
 function fillConfigSheetLabels_(sheet) {
   setIfEmpty_(sheet.getRange('A1'), 'ラベル出力先スプレッドシートID（自動設定・空欄でOK）');
   setIfEmpty_(sheet.getRange('A2'), '印刷時の余白（メモ・スクリプトでは使用しません）');
   setIfEmpty_(sheet.getRange(CONFIG_PRINT_MARGIN_CELL), CONFIG_PRINT_MARGIN_DEFAULT);
+  setIfEmpty_(sheet.getRange('A3'), 'ラベルシールのサイズ（プルダウンで選択）');
+  setIfEmpty_(sheet.getRange(CONFIG_LABEL_SIZE_CELL), LABEL_SIZE_3X8);
+  sheet.getRange(CONFIG_LABEL_SIZE_CELL).setDataValidation(
+    SpreadsheetApp.newDataValidation()
+      .requireValueInList([LABEL_SIZE_3X8, LABEL_SIZE_3X6], true)
+      .setAllowInvalid(false)
+      .build()
+  );
   setIfEmpty_(sheet.getRange(CONFIG_LINKS_HEADER_ROW, 1), '案件ファイルのリンク（1行に1件、URLを貼り付け）');
   setIfEmpty_(sheet.getRange(CONFIG_LINKS_HEADER_ROW, 2), 'ファイル名');
-  sheet.getRange('A1:A2').setFontWeight('bold');
+  sheet.getRange('A1:A3').setFontWeight('bold');
   sheet.getRange(CONFIG_LINKS_HEADER_ROW, 1, 1, 2).setFontWeight('bold');
 }
 
@@ -343,20 +352,32 @@ function uniqueSheetName_(ss, baseName) {
 var LABEL_SHEET_NAME = 'ラベル印刷'; // 旧バージョンが残していた集計用シート名（あれば案件扱いから除外する）
 var LABEL_SPREADSHEET_SUFFIX = '（ラベル印刷）';
 
-// 面付け（A-one マルチプリンタ用ラベルシール24面: 66mm×33.9mm、3列×8行）
+// 面付け（A-one マルチプリンタ用ラベルシール。「設定」シートのプルダウンで
+// 3×8（24面・66mm×33.9mm）と3×6（18面相当・66mm×45.2mm）を切り替えられる。
+// 総高さ271.2mmは共通で、8行と6行のどちらで均等に割るかだけが違う）
 var LABEL_COLS = 3;
-var LABEL_ROWS = 8;
 var LABEL_COPIES_PER_ENTRY = 1; // 1件につき1枚配置
 var LABEL_COL_WIDTH_MM = 66;    // ラベル1枚の実寸幅。商品が異なる場合は要調整
 var MM_TO_PX = 96 / 25.4;
 
-// ラベル1枚（実寸33.9mm、96dpi換算で128px）を3段に分ける。
-// セル内改行では段ごとに異なる書式（数量だけ中央寄せ等）を付けられないため、
-// 「日付＋企業名／メニュー名／数量」を別々のセル（3段）にしている。
-// 内訳は34px/48px/46px（メニュー名の2行折り返しのため、数量段からさらに2px
-// 減らしてメニュー名段に足した。合計128pxは変わらないためラベル1枚の実寸33.9mmは維持される）
-var LABEL_SUBROW_HEIGHTS_PX = [34, 48, 46];
-var LABEL_SUBROWS = LABEL_SUBROW_HEIGHTS_PX.length;
+var LABEL_SIZE_3X8 = '3×8（66mm×33.9mm）';
+var LABEL_SIZE_3X6 = '3×6（66mm×45.2mm）';
+
+// 内訳（3段の高さpx）は、3×8は34/48/46（メニュー名の2行折り返しのため、数量段
+// からさらに2px減らしてメニュー名段に足した。合計128px＝33.9mm）、3×6は
+// 171px（＝45.2mm）を同じ比率で配分した45/64/62を初期値とする。
+var LABEL_SIZE_PRESETS = {};
+LABEL_SIZE_PRESETS[LABEL_SIZE_3X8] = { rows: 8, subrowHeightsPx: [34, 48, 46] };
+LABEL_SIZE_PRESETS[LABEL_SIZE_3X6] = { rows: 6, subrowHeightsPx: [45, 64, 62] };
+
+/**
+ * 「設定」シートB3で選択されたラベルサイズのプリセット（行数・3段の高さpx）を返す。
+ * 未選択・不正な値の場合は3×8（従来のデフォルト）を返す。
+ */
+function getLabelSizePreset_(configSheet) {
+  var raw = String(configSheet.getRange(CONFIG_LABEL_SIZE_CELL).getValue() || '').trim();
+  return LABEL_SIZE_PRESETS[raw] || LABEL_SIZE_PRESETS[LABEL_SIZE_3X8];
+}
 
 var LABEL_FONT_SIZE = 14;      // 1段目（日付＋企業名）のフォントサイズ
 var LABEL_MENU_FONT_SIZE = 12; // 2段目（メニュー名）。1段目より2pt小さい
@@ -378,6 +399,7 @@ function createLabels() {
   }
   var timeZone = ss.getSpreadsheetTimeZone();
   var labelSs = getOrCreateLabelSpreadsheet_(ss, configSheet);
+  var sizePreset = getLabelSizePreset_(configSheet);
 
   var caseSheetNames = [];
   var createdCases = [];
@@ -394,7 +416,7 @@ function createLabels() {
       if (entries.length === 0) {
         return;
       }
-      writeLabelSheetForCase_(labelSs, name, entries);
+      writeLabelSheetForCase_(labelSs, name, entries, sizePreset);
       createdCases.push(name);
       totalEntries += entries.length;
     } catch (e) {
@@ -529,14 +551,15 @@ function normalizeDateText_(text) {
 }
 
 /**
- * 1案件分の entries を3列×8行（1件＝3段のセル）のグリッドに配置し、labelSs内の
- * 同名タブへ書き込む。1エントリにつき1枚を配置し、24枚（24エントリ）ごとに
- * 次の8行ブロック＝次ページへ折り返す。
+ * 1案件分の entries を3列×N行（1件＝3段のセル。Nは「設定」シートで選んだ
+ * sizePresetの行数）のグリッドに配置し、labelSs内の同名タブへ書き込む。
+ * 1エントリにつき1枚を配置し、1ページ分（3列×N行）ごとに次のブロック＝
+ * 次ページへ折り返す。
  * 既に同名タブがあれば中身だけ消して再利用するため、再実行しても古い内容は
  * 残らない（タブ自体を削除しないのは、印刷余白などタブに紐づく設定を
  * 失わないようにするため）。
  */
-function writeLabelSheetForCase_(labelSs, caseName, entries) {
+function writeLabelSheetForCase_(labelSs, caseName, entries, sizePreset) {
   // 削除して作り直すと、印刷余白などタブに紐づく設定が失われる可能性があるため、
   // 既存タブがあれば中身だけ消して（clear）再利用する。
   var sheet = labelSs.getSheetByName(caseName);
@@ -546,10 +569,14 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
     sheet = labelSs.insertSheet(caseName);
   }
 
-  var entriesPerColumn = Math.floor(LABEL_ROWS / LABEL_COPIES_PER_ENTRY);
+  var labelRows = sizePreset.rows;
+  var subrowHeightsPx = sizePreset.subrowHeightsPx;
+  var subrows = subrowHeightsPx.length;
+
+  var entriesPerColumn = Math.floor(labelRows / LABEL_COPIES_PER_ENTRY);
   var entriesPerPage = entriesPerColumn * LABEL_COLS;
   var totalPages = Math.ceil(entries.length / entriesPerPage);
-  var totalRows = totalPages * LABEL_ROWS * LABEL_SUBROWS;
+  var totalRows = totalPages * labelRows * subrows;
 
   // 最終ページで3列目が1件も埋まらないと、その列が空のままになり印刷範囲が
   // 2列分に縮んで中央寄せがずれてしまう。先に全セルへ空文字列の値を入れておくことに加え、
@@ -571,7 +598,7 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
         var entry = entries[index++];
         for (var copy = 0; copy < LABEL_COPIES_PER_ENTRY; copy++) {
           var physicalSlot = slot * LABEL_COPIES_PER_ENTRY + copy;
-          var rowBase = page * LABEL_ROWS * LABEL_SUBROWS + physicalSlot * LABEL_SUBROWS;
+          var rowBase = page * labelRows * subrows + physicalSlot * subrows;
           writeLabelCellGroup_(sheet, rowBase, col + 1, entry);
         }
       }
@@ -582,8 +609,8 @@ function writeLabelSheetForCase_(labelSs, caseName, entries) {
     sheet.setColumnWidth(col1, Math.round(LABEL_COL_WIDTH_MM * MM_TO_PX));
   }
   for (var r = 0; r < totalRows; r++) {
-    var subIndex = r % LABEL_SUBROWS;
-    sheet.setRowHeight(r + 1, LABEL_SUBROW_HEIGHTS_PX[subIndex]);
+    var subIndex = r % subrows;
+    sheet.setRowHeight(r + 1, subrowHeightsPx[subIndex]);
   }
 }
 
