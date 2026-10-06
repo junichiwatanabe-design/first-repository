@@ -384,7 +384,7 @@ function getLabelSizePreset_(configSheet) {
 
 var LABEL_FONT_SIZE = 14;      // 1段目（日付＋企業名）のフォントサイズ
 var LABEL_MENU_FONT_SIZE = 12; // 2段目（メニュー名）。1段目より2pt小さい
-var LABEL_QTY_FONT_SIZE = 28;  // 3段目（数量）。太字・大きめフォントで強調する
+var LABEL_QTY_FONT_SIZE = 27;  // 3段目（数量）。太字・大きめフォントで強調する
 var LABEL_MENU_MAX_ZENKAKU_LEN = 30; // 2段目（メニュー名）は全角換算でこの文字数を超えたら切り捨てる
 
 /**
