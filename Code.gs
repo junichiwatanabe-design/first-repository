@@ -616,7 +616,8 @@ function writeLabelSheetForCase_(labelSs, caseName, entries, sizePreset) {
 
 /**
  * ラベル1件分（3段）を書き込む。
- *   1段目: 日付＋企業名（左寄せ、WrapStrategy.CLIP＝折り返さず高さ固定）
+ *   1段目: 日付＋企業名＋「様」（左寄せ、WrapStrategy.CLIP＝折り返さず高さ固定。
+ *          文字数が多い場合は折り返さず末尾が切れる）
  *   2段目: メニュー名（中央寄せ・1段目より2pt小さいフォント。
  *          WrapStrategy.WRAP＝2行まで折り返す。全角30文字
  *          （LABEL_MENU_MAX_ZENKAKU_LEN）を超える分は事前に切り捨てているため、
@@ -624,7 +625,7 @@ function writeLabelSheetForCase_(labelSs, caseName, entries, sizePreset) {
  *   3段目: 数量（中央寄せ・太字・大きめフォントで強調、WrapStrategy.CLIP）
  */
 function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
-  sheet.getRange(rowBase + 1, col1).setValue(entry.date + ' ' + entry.company)
+  sheet.getRange(rowBase + 1, col1).setValue(entry.date + ' ' + entry.company + ' 様')
     .setFontSize(LABEL_FONT_SIZE)
     .setFontWeight('bold')
     .setHorizontalAlignment('left')
