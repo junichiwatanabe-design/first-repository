@@ -535,22 +535,28 @@ function formatLabelDate_(value, timeZone) {
 }
 
 /**
- * 「7/16」「2026.7.16」「2026/7/17」など表記が揺れた月日の文字列を、
- * ゼロ埋めなし・年なしの「7/16」形式に統一する。区切り文字（`.`または`/`）で
- * 分割した末尾2つを月・日とみなす（先頭に年が付いていても無視される）。
- * 月日の形式として解釈できない場合は元の文字列をそのまま返す。
+ * 「7/16」「2026.7.16」「2026/7/17」「2026年7月16日（木）」など表記が揺れた
+ * 月日の文字列を、ゼロ埋めなし・年なしの「7/16」形式に統一する。
+ * 曜日の注記「（木）」などが末尾に付いていても、数字部分だけを拾うため
+ * 影響しない。月日の形式として解釈できない場合は元の文字列をそのまま返す。
  */
 function normalizeDateText_(text) {
-  var parts = text.split(/[./]/).filter(function (p) { return p !== ''; });
-  if (parts.length < 2) {
-    return text;
+  // 「2026年7月16日（木）」のような漢字区切り表記
+  var kanji = text.match(/(\d{1,2})月(\d{1,2})日/);
+  if (kanji) {
+    return Number(kanji[1]) + '/' + Number(kanji[2]);
   }
-  var month = Number(parts[parts.length - 2]);
-  var day = Number(parts[parts.length - 1]);
-  if (isNaN(month) || isNaN(day)) {
-    return text;
+  // 「2026.7.16（木）」「2026/7/16」のように年＋月＋日（区切りは`.`または`/`）
+  var withYear = text.match(/\d{4}[./](\d{1,2})[./](\d{1,2})/);
+  if (withYear) {
+    return Number(withYear[1]) + '/' + Number(withYear[2]);
   }
-  return month + '/' + day;
+  // 「7/16」「7.16」のように月日のみ（年なし）
+  var withoutYear = text.match(/(\d{1,2})[./](\d{1,2})/);
+  if (withoutYear) {
+    return Number(withoutYear[1]) + '/' + Number(withoutYear[2]);
+  }
+  return text;
 }
 
 /**
