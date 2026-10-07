@@ -25,11 +25,13 @@ var CONFIG_LINKS_HEADER_ROW = 4;          // 案件ファイルのリンク一�
 var CONFIG_LINKS_DATA_START_ROW = 5;      // 案件ファイルのリンク一覧のデータ開始行
 var LEGACY_LINKS_SHEET_NAME = '案件リンク一覧'; // 旧バージョンで使っていたリンク一覧シート名（あれば「設定」へ自動移行して削除する）
 var TAB_NAME_LABEL = '読み込むタブ名';
+var LEGACY_LABEL_SS_LABEL = 'ラベル出力先スプレッドシートID（自動設定・空欄でOK）';
 
 /**
  * 「設定」シートを取得する。無ければ新規作成し、見出しラベルを設定したうえで
  * アラートを出して処理を中断する（初回のみ）。既にある場合は、1行目に
- * タブ名の行が無い旧レイアウトであれば自動移行し、不足している見出しラベル
+ * タブ名の行が無い旧レイアウト、または2行目がラベル出力先スプレッドシートID
+ * の名残である旧レイアウトであれば自動移行し、不足している見出しラベル
  * だけを補完する（ユーザー入力済みの値は上書きしない）。
  */
 function getOrCreateConfigSheet_(ss) {
@@ -39,6 +41,7 @@ function getOrCreateConfigSheet_(ss) {
     sheet = ss.insertSheet(CONFIG_SHEET_NAME);
   } else {
     migrateBackToTabNameLayout_(sheet);
+    migrateAwayFromLabelSsLayout_(sheet);
   }
 
   fillConfigSheetLabels_(sheet);
@@ -90,6 +93,18 @@ function setIfEmpty_(range, value) {
 function migrateBackToTabNameLayout_(sheet) {
   if (String(sheet.getRange('A1').getValue()).trim() !== TAB_NAME_LABEL) {
     sheet.insertRowBefore(1);
+  }
+}
+
+/**
+ * 旧バージョン（単一スプレッドシート化する前）では2行目が「ラベル出力先
+ * スプレッドシートID」の指定だったが、ラベル専用の別ファイルを作らなくなった
+ * ため不要になった。2行目がその名残であれば行ごと削除し、3行目以降
+ * （印刷余白メモ・ラベルサイズ・URL一覧）を1行分繰り上げる。
+ */
+function migrateAwayFromLabelSsLayout_(sheet) {
+  if (String(sheet.getRange('A2').getValue()).trim() === LEGACY_LABEL_SS_LABEL) {
+    sheet.deleteRow(2);
   }
 }
 
