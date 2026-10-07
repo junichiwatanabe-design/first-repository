@@ -1,8 +1,8 @@
 /**
  * 「設定」シートに手入力した案件ファイルのURLを1件ずつ開き、ファイル名から
- * 案件実施日・企業名を読み取って一覧に表示するとともに、同じ「設定」シートで
- * 指定したタブ名の内容を集計用スプレッドシートへ案件ごとに別タブとしてコピー
- * する（印刷時に案件単位で改ページされるよう1案件＝1タブの構成にしている）。
+ * 案件実施日・企業名を読み取るとともに、同じ「設定」シートで指定したタブ名の
+ * 内容を集計用スプレッドシートへ案件ごとに別タブとしてコピーする（印刷時に
+ * 案件単位で改ページされるよう1案件＝1タブの構成にしている）。
  *
  * さらに、集計済みの案件タブから日付・企業名・メニュー名・数量を集めて、
  * ラベル専用の別スプレッドシートへ印刷用ラベル（A4・24面）を作成する機能も持つ。
@@ -59,7 +59,7 @@ function getOrCreateConfigSheet_(ss) {
 }
 
 /**
- * 「設定」シートの見出しラベル（A1〜A4・A5・B5）とB3・B4の初期値を補完する。
+ * 「設定」シートの見出しラベル（A1〜A4・A5）とB3・B4の初期値を補完する。
  * 既に値が入っているセル（B1・B2・B3・B4・URL一覧など）は上書きしない。
  */
 function fillConfigSheetLabels_(sheet) {
@@ -76,9 +76,8 @@ function fillConfigSheetLabels_(sheet) {
       .build()
   );
   setIfEmpty_(sheet.getRange(CONFIG_LINKS_HEADER_ROW, 1), '案件ファイルのリンク（1行に1件、URLを貼り付け）');
-  setIfEmpty_(sheet.getRange(CONFIG_LINKS_HEADER_ROW, 2), 'ファイル名');
   sheet.getRange('A1:A4').setFontWeight('bold');
-  sheet.getRange(CONFIG_LINKS_HEADER_ROW, 1, 1, 2).setFontWeight('bold');
+  sheet.getRange(CONFIG_LINKS_HEADER_ROW, 1).setFontWeight('bold');
 }
 
 function setIfEmpty_(range, value) {
@@ -140,11 +139,11 @@ var CASE_QTY_FONT_SIZE = 14;       // 案件タブの「数量」列のデータ
 /**
  * メニュー「日次データ取込」→「リンクから読込」から呼び出されるメイン関数。
  * 「設定」シートのCONFIG_LINKS_DATA_START_ROW行目以降のA列に貼られたURLを
- * 1件ずつ開き、リンク先ファイルの名前（Driveのファイル名）を同じ行のB列に
- * 表示するとともに、そのファイル名から読み取った「案件実施日 + 企業名」で
- * 名前をつけた案件タブを作成し、「設定」シートB1で指定したタブ名の内容を
- * そのままコピーする。実行のたびに前回までの案件タブは全て削除してから
- * 作り直す（deleteAllCaseSheets_。案件タブが際限なく増え続けるのを防ぐ）。
+ * 1件ずつ開き、リンク先ファイルの名前（Driveのファイル名）から読み取った
+ * 「案件実施日 + 企業名」で名前をつけた案件タブを作成し、「設定」シートB1で
+ * 指定したタブ名の内容をそのままコピーする。実行のたびに前回までの案件タブは
+ * 全て削除してから作り直す（deleteAllCaseSheets_。案件タブが際限なく
+ * 増え続けるのを防ぐ）。
  */
 function importFromLinks() {
   var ui = SpreadsheetApp.getUi();
@@ -174,11 +173,8 @@ function importFromLinks() {
 
   var createdDisplayNames = [];
   var allWarnings = [];
-  urls.forEach(function (url, i) {
-    var rowNum = CONFIG_LINKS_DATA_START_ROW + i;
-    var fileNameCell = configSheet.getRange(rowNum, 2);
+  urls.forEach(function (url) {
     if (!url) {
-      fileNameCell.setValue('');
       return;
     }
 
@@ -187,9 +183,6 @@ function importFromLinks() {
       var sourceSs = resolveLinkedSpreadsheet_(url);
       displayLabel = sourceSs.getName();
       var parsed = extractDateAndCompanyFromFileName_(displayLabel);
-
-      // ファイル自体は開けたので、タブが見つからない場合でも診断用にファイル名は表示する
-      fileNameCell.setValue(displayLabel);
 
       var sourceSheet = sourceSs.getSheetByName(tabName);
       if (!sourceSheet) {
@@ -216,7 +209,6 @@ function importFromLinks() {
       createdDisplayNames.push(newSheetName);
     } catch (e) {
       allWarnings.push(displayLabel + ' : 処理中にエラーが発生しました（' + e.message + '）');
-      fileNameCell.setValue('');
     }
   });
 
