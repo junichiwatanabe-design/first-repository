@@ -1,17 +1,15 @@
 /**
  * 「設定」シートに手入力した案件ファイルのURLを1件ずつ開き、ファイル名から
- * 案件実施日・企業名を読み取るとともに、同じ「設定」シートで指定したタブ名の
- * 内容を集計用スプレッドシートへ案件ごとに別タブとしてコピーする（印刷時に
- * 案件単位で改ページされるよう1案件＝1タブの構成にしている）。
- *
- * さらに、集計済みの案件タブから日付・企業名・メニュー名・数量を集めて、
- * ラベル専用の別スプレッドシートへ印刷用ラベル（A4・24面）を作成する機能も持つ。
+ * 案件実施日・企業名を読み取るとともに、リンク先ファイル内の指定タブから
+ * 日付・企業名・メニュー名・数量を直接読み取って、このスプレッドシート自身に
+ * 案件ごとの印刷用ラベル（A-oneラベルシール、設定で3×8/3×6を選択）タブを
+ * 作成する。元の案件ファイルをコピーする工程は持たないため、スプレッドシートは
+ * これ1枚だけで運用できる。
  *
  * ファイル構成:
  *   1. 設定シート関連
- *   2. リンクからの案件読み込み
- *   3. 印刷用ラベル作成
- *   4. 共通ヘルパー
+ *   2. リンクからのラベル作成
+ *   3. 共通ヘルパー
  */
 
 // ============================================================
@@ -20,12 +18,11 @@
 
 var CONFIG_SHEET_NAME = '設定';
 var CONFIG_TAB_NAME_CELL = 'B1';          // 各ファイル内で読み込む固定タブ名
-var CONFIG_LABEL_SS_CELL = 'B2';          // ラベル出力先スプレッドシートの URL/ID（自動設定）
-var CONFIG_PRINT_MARGIN_CELL = 'B3';      // 印刷時余白のメモ（スクリプトからは読み書きしない）
+var CONFIG_PRINT_MARGIN_CELL = 'B2';      // 印刷時余白のメモ（スクリプトからは読み書きしない）
 var CONFIG_PRINT_MARGIN_DEFAULT = '上下12mm・左右5mm程度';
-var CONFIG_LABEL_SIZE_CELL = 'B4';        // ラベルシールのサイズ（プルダウンで3×8/3×6を選択）
-var CONFIG_LINKS_HEADER_ROW = 5;          // 案件ファイルのリンク一覧の見出し行
-var CONFIG_LINKS_DATA_START_ROW = 6;      // 案件ファイルのリンク一覧のデータ開始行
+var CONFIG_LABEL_SIZE_CELL = 'B3';        // ラベルシールのサイズ（プルダウンで3×8/3×6を選択）
+var CONFIG_LINKS_HEADER_ROW = 4;          // 案件ファイルのリンク一覧の見出し行
+var CONFIG_LINKS_DATA_START_ROW = 5;      // 案件ファイルのリンク一覧のデータ開始行
 var LEGACY_LINKS_SHEET_NAME = '案件リンク一覧'; // 旧バージョンで使っていたリンク一覧シート名（あれば「設定」へ自動移行して削除する）
 var TAB_NAME_LABEL = '読み込むタブ名';
 
@@ -59,15 +56,14 @@ function getOrCreateConfigSheet_(ss) {
 }
 
 /**
- * 「設定」シートの見出しラベル（A1〜A4・A5）とB3・B4の初期値を補完する。
- * 既に値が入っているセル（B1・B2・B3・B4・URL一覧など）は上書きしない。
+ * 「設定」シートの見出しラベル（A1〜A3・A4）とB2・B3の初期値を補完する。
+ * 既に値が入っているセル（B1・B2・B3・URL一覧など）は上書きしない。
  */
 function fillConfigSheetLabels_(sheet) {
   setIfEmpty_(sheet.getRange('A1'), TAB_NAME_LABEL);
-  setIfEmpty_(sheet.getRange('A2'), 'ラベル出力先スプレッドシートID（自動設定・空欄でOK）');
-  setIfEmpty_(sheet.getRange('A3'), '印刷時の余白（メモ・スクリプトでは使用しません）');
+  setIfEmpty_(sheet.getRange('A2'), '印刷時の余白（メモ・スクリプトでは使用しません）');
   setIfEmpty_(sheet.getRange(CONFIG_PRINT_MARGIN_CELL), CONFIG_PRINT_MARGIN_DEFAULT);
-  setIfEmpty_(sheet.getRange('A4'), 'ラベルシールのサイズ（プルダウンで選択）');
+  setIfEmpty_(sheet.getRange('A3'), 'ラベルシールのサイズ（プルダウンで選択）');
   setIfEmpty_(sheet.getRange(CONFIG_LABEL_SIZE_CELL), LABEL_SIZE_3X8);
   sheet.getRange(CONFIG_LABEL_SIZE_CELL).setDataValidation(
     SpreadsheetApp.newDataValidation()
@@ -76,7 +72,7 @@ function fillConfigSheetLabels_(sheet) {
       .build()
   );
   setIfEmpty_(sheet.getRange(CONFIG_LINKS_HEADER_ROW, 1), '案件ファイルのリンク（1行に1件、URLを貼り付け）');
-  sheet.getRange('A1:A4').setFontWeight('bold');
+  sheet.getRange('A1:A3').setFontWeight('bold');
   sheet.getRange(CONFIG_LINKS_HEADER_ROW, 1).setFontWeight('bold');
 }
 
@@ -87,10 +83,9 @@ function setIfEmpty_(range, value) {
 }
 
 /**
- * 直前のバージョンでは1行目に「読み込むタブ名」の行が無かったが、固定タブ名
- * 指定方式に戻したため1行目が必要になった。1行目がまだその行になっていなければ
- * 空行を1行挿入する（既存のラベルSS ID・印刷余白メモ・URL一覧は1行分繰り下がる
- * だけで内容は保持される）。
+ * 旧バージョンでは1行目が「読み込むタブ名」の指定だったが、現在は全タブを
+ * 読み込むためこの指定は不要になった。1行目がその名残であれば行ごと削除し、
+ * 2行目以降（ラベルSS ID・印刷余白メモ・URL一覧）を1行分繰り上げる。
  */
 function migrateBackToTabNameLayout_(sheet) {
   if (String(sheet.getRange('A1').getValue()).trim() !== TAB_NAME_LABEL) {
@@ -123,229 +118,14 @@ function migrateLegacyLinksSheet_(ss, configSheet) {
 
 function onOpen() {
   SpreadsheetApp.getUi()
-    .createMenu('日次データ取込')
-    .addItem('リンクから読込', 'importFromLinks')
-    .addItem('ラベル作成', 'createLabels')
+    .createMenu('ラベル作成')
+    .addItem('作成', 'createLabels')
     .addToUi();
 }
 
 // ============================================================
-// 2. リンクからの案件読み込み
+// 2. リンクからのラベル作成
 // ============================================================
-
-var CASE_MENU_NAME_FONT_SIZE = 13; // 案件タブの「メニュー名」列のデータ行に適用するフォントサイズ
-var CASE_QTY_FONT_SIZE = 14;       // 案件タブの「数量」列のデータ行に適用するフォントサイズ
-
-/**
- * メニュー「日次データ取込」→「リンクから読込」から呼び出されるメイン関数。
- * 「設定」シートのCONFIG_LINKS_DATA_START_ROW行目以降のA列に貼られたURLを
- * 1件ずつ開き、リンク先ファイルの名前（Driveのファイル名）から読み取った
- * 「案件実施日 + 企業名」で名前をつけた案件タブを作成し、「設定」シートB1で
- * 指定したタブ名の内容をそのままコピーする。実行のたびに前回までの案件タブは
- * 全て削除してから作り直す（deleteAllCaseSheets_。案件タブが際限なく
- * 増え続けるのを防ぐ）。
- */
-function importFromLinks() {
-  var ui = SpreadsheetApp.getUi();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var configSheet = getOrCreateConfigSheet_(ss);
-  if (!configSheet) {
-    return;
-  }
-  var tabName = configSheet.getRange(CONFIG_TAB_NAME_CELL).getValue();
-  if (!tabName) {
-    ui.alert('設定シートの「' + CONFIG_TAB_NAME_CELL + '」(タブ名) を入力してください。');
-    return;
-  }
-
-  var numRows = Math.max(configSheet.getLastRow() - CONFIG_LINKS_DATA_START_ROW + 1, 0);
-  if (numRows === 0) {
-    ui.alert('「' + CONFIG_SHEET_NAME + '」シートの' + CONFIG_LINKS_DATA_START_ROW +
-      '行目以降に案件ファイルのURLを入力してください。');
-    return;
-  }
-
-  var urls = configSheet.getRange(CONFIG_LINKS_DATA_START_ROW, 1, numRows, 1).getValues()
-    .map(function (row) { return String(row[0] || '').trim(); });
-
-  // 実行のたびに前回までの案件タブをすべて削除してから作り直す
-  deleteAllCaseSheets_(ss);
-
-  var createdDisplayNames = [];
-  var allWarnings = [];
-  urls.forEach(function (url) {
-    if (!url) {
-      return;
-    }
-
-    var displayLabel = url;
-    try {
-      var sourceSs = resolveLinkedSpreadsheet_(url);
-      displayLabel = sourceSs.getName();
-      var parsed = extractDateAndCompanyFromFileName_(displayLabel);
-
-      var sourceSheet = sourceSs.getSheetByName(tabName);
-      if (!sourceSheet) {
-        allWarnings.push(displayLabel + ' : タブ「' + tabName + '」が見つかりません');
-        return;
-      }
-      var values = sourceSheet.getDataRange().getValues();
-      if (values.length === 0) {
-        allWarnings.push(displayLabel + ' : データがありません');
-        return;
-      }
-
-      // 案件タブを作成し、リンク先の内容をそのままコピーする
-      var baseName = sanitizeSheetName_((parsed.date ? parsed.date + ' ' : '') + parsed.company);
-      var newSheetName = uniqueSheetName_(ss, baseName);
-
-      // 元シートの書式（フォント・背景色・罫線・セル結合・列幅など）を保つため
-      // getValues()+setValues() ではなく copyTo() でシートごと複製する。
-      var newSheet = sourceSheet.copyTo(ss);
-      newSheet.setName(newSheetName);
-      copyEvaluatedFormulaCells_(sourceSheet, newSheet, values);
-
-      applyCaseMenuFontSize_(newSheet, values);
-      createdDisplayNames.push(newSheetName);
-    } catch (e) {
-      allWarnings.push(displayLabel + ' : 処理中にエラーが発生しました（' + e.message + '）');
-    }
-  });
-
-  ui.alert('リンク読込 結果', createdDisplayNames.length + '件の案件を読み込みました。\n' +
-    createdDisplayNames.join('\n'), ui.ButtonSet.OK);
-
-  // 警告・エラーは通常の結果に埋もれて見落とされないよう、別ダイアログで目立たせて表示する
-  if (allWarnings.length > 0) {
-    ui.alert('⚠️要確認', allWarnings.join('\n'), ui.ButtonSet.OK);
-  }
-}
-
-/**
- * copyTo()でコピーされたシートのうち、(a) 数式が入っていたセルと、(b) コピー後に
- * 空欄になってしまっているのに元シートでは値があったセルを、評価済みの値
- * （values）で上書きする。
- *
- * (a) は、copyTo()が数式（他シート参照など）もそのままコピーしてしまい、
- * コピー先で参照が切れて #REF! 等のエラーになることを防ぐため。
- * (b) は、IMPORTRANGE・QUERY・ARRAYFORMULAなど1つのセルの数式が周囲の
- * セルへ結果を展開する（スピルする）形式の場合、Apps Scriptの
- * getFormulas()では展開先のセルは「数式なし」として扱われ、copyTo()でも
- * 展開先セル自体には値が複製されない（数式の実体は先頭セルにしかないため）。
- * その結果、(a)の条件だけでは展開範囲のほとんどが空欄のままコピーされてしまう。
- * 元シートでは値があった（＝スピル結果を含む）のにコピー後は空欄、という
- * セルだけを補完することで、この抜け漏れを埋める。
- *
- * それ以外の、数式もなくコピー後も空欄でないセル（時刻・日付など通常の入力値）
- * には触れない。全セルを評価済みの値で上書きすると、Apps Scriptが値をいったん
- * Dateオブジェクトに変換してから書き込み先のタイムゾーンで解釈し直すため、
- * コピー元とコピー先のタイムゾーン設定が異なる場合に時刻がズレてしまう。
- * 触る必要のないセルには触れないことでこのズレを避ける。
- */
-function copyEvaluatedFormulaCells_(sourceSheet, targetSheet, values) {
-  var numRows = values.length;
-  var numCols = values[0].length;
-  var formulas = sourceSheet.getRange(1, 1, numRows, numCols).getFormulas();
-  var copiedValues = targetSheet.getRange(1, 1, numRows, numCols).getValues();
-  for (var r = 0; r < numRows; r++) {
-    for (var c = 0; c < numCols; c++) {
-      var hasFormula = !!formulas[r][c];
-      var copiedIsBlank = copiedValues[r][c] === '' || copiedValues[r][c] == null;
-      var sourceHasValue = values[r][c] !== '' && values[r][c] != null;
-      if (hasFormula || (copiedIsBlank && sourceHasValue)) {
-        targetSheet.getRange(r + 1, c + 1).setValue(values[r][c]);
-      }
-    }
-  }
-}
-
-/**
- * ファイル名から日付部分を抜き出し、日付テキストと残りの文字列（企業名。前後の
- * 【】/[]は取り除く）を返す。対応する日付表記は以下の2パターン。
- *   - 区切りあり: 区切り文字が `.` `/` `-` のいずれか、月日はゼロ埋めあり/なしの両方
- *     （「2026.8.1」「2026/08/01」「2026-8-01」等）
- *   - 区切りなし: `yyyyMMdd` の8桁連結表記で月日は常に2桁ゼロ埋め固定（「20260801」）
- * 日付が見つからない場合、dateは空文字になりcompanyはファイル名そのまま（記号除去のみ）。
- */
-function extractDateAndCompanyFromFileName_(fileName) {
-  var m = fileName.match(/(^|\D)(\d{4})[./\-](\d{1,2})[./\-](\d{1,2})(\D|$)/) ||
-    fileName.match(/(^|\D)(\d{4})(\d{2})(\d{2})(\D|$)/);
-  if (!m) {
-    return { date: '', company: cleanCompanyText_(fileName) };
-  }
-  var dateText = m[2] + '.' + Number(m[3]) + '.' + Number(m[4]);
-  var remaining = fileName.substring(0, m.index) + m[1] + m[5] +
-    fileName.substring(m.index + m[0].length);
-  return { date: dateText, company: cleanCompanyText_(remaining) };
-}
-
-/** ファイル名から前後の【】/[]などの記号を取り除く。 */
-function cleanCompanyText_(text) {
-  var original = String(text).trim();
-  var cleaned = original.replace(/^[【\[]\s*/, '').replace(/[】\]]\s*/, ' ').trim();
-  return cleaned || original;
-}
-
-/**
- * 「設定」シートを除く全ての案件タブを削除する。実行のたびに前回までの案件タブを
- * 一掃してから作り直すことで、タブが際限なく増え続けるのを防ぐ。
- */
-function deleteAllCaseSheets_(ss) {
-  deleteSheetsWhere_(ss, function (sheet) {
-    return sheet.getName() !== CONFIG_SHEET_NAME;
-  });
-}
-
-/**
- * 案件タブの「メニュー名」「数量」列のデータ行（見出し行を除く）だけ
- * フォントサイズを設定する。太字・背景色などは変更しない（それ以外の書式は
- * 元ファイルのものをそのまま使う）。
- */
-function applyCaseMenuFontSize_(sheet, values) {
-  var menuHeader = findMenuTableHeader_(values);
-  if (!menuHeader) {
-    return;
-  }
-  var dataStartRow1 = menuHeader.row + 2;
-  var numDataRows = values.length - dataStartRow1 + 1;
-  if (numDataRows <= 0) {
-    return;
-  }
-  setColumnFontSize_(sheet, menuHeader.colsByLabel['メニュー名'], dataStartRow1, numDataRows, CASE_MENU_NAME_FONT_SIZE);
-  setColumnFontSize_(sheet, menuHeader.colsByLabel['数量'], dataStartRow1, numDataRows, CASE_QTY_FONT_SIZE);
-}
-
-function setColumnFontSize_(sheet, colIndex, startRow1, numRows, fontSize) {
-  if (colIndex == null) {
-    return;
-  }
-  sheet.getRange(startRow1, colIndex + 1, numRows, 1).setFontSize(fontSize);
-}
-
-function sanitizeSheetName_(name) {
-  var sanitized = String(name).replace(/[\[\]\*\?\/\\:]/g, '_').trim();
-  if (sanitized.length > 100) {
-    sanitized = sanitized.substring(0, 100);
-  }
-  return sanitized || 'シート';
-}
-
-function uniqueSheetName_(ss, baseName) {
-  var name = baseName;
-  var suffix = 2;
-  while (ss.getSheetByName(name)) {
-    name = baseName + ' (' + suffix + ')';
-    suffix++;
-  }
-  return name;
-}
-
-// ============================================================
-// 3. 印刷用ラベル作成
-// ============================================================
-
-var LABEL_SHEET_NAME = 'ラベル印刷'; // 旧バージョンが残していた集計用シート名（あれば案件扱いから除外する）
-var LABEL_SPREADSHEET_SUFFIX = '（ラベル印刷）';
 
 // 面付け（A-one マルチプリンタ用ラベルシール。「設定」シートのプルダウンで
 // 3×8（24面・66mm×33.9mm）と3×6（18面相当・66mm×45.2mm）を切り替えられる。
@@ -380,10 +160,11 @@ var LABEL_QTY_FONT_SIZE = 25;  // 3段目（数量）。太字・大きめフォ
 var LABEL_MENU_MAX_ZENKAKU_LEN = 28; // 2段目（メニュー名）は全角換算でこの文字数を超えたら切り捨てる
 
 /**
- * メニュー「日次データ取込」→「ラベル作成」から呼び出されるメイン関数。
- * 「設定」シートを除く案件タブごとに、日付・企業名・メニュー名・数量を集めて、
- * ラベル専用スプレッドシート内の同名タブへ印刷用ラベルを作成する。
- * 案件タブの内容は実行のたびに変わるため、都度シートを走査して集計する。
+ * メニュー「ラベル作成」→「作成」から呼び出されるメイン関数。
+ * 「設定」シートのURL一覧を1件ずつ開き、リンク先ファイル内の指定タブから
+ * 直接（コピーせずに）日付・企業名・メニュー名・数量を読み取り、このスプレッド
+ * シート自身に案件ごとのラベルタブを作成する。実行のたびに、今回のURL一覧に
+ * 対応しなくなった古いラベルタブは削除される。
  */
 function createLabels() {
   var ui = SpreadsheetApp.getUi();
@@ -392,41 +173,72 @@ function createLabels() {
   if (!configSheet) {
     return;
   }
+  var tabName = configSheet.getRange(CONFIG_TAB_NAME_CELL).getValue();
+  if (!tabName) {
+    ui.alert('設定シートの「' + CONFIG_TAB_NAME_CELL + '」(タブ名) を入力してください。');
+    return;
+  }
+
+  var numRows = Math.max(configSheet.getLastRow() - CONFIG_LINKS_DATA_START_ROW + 1, 0);
+  if (numRows === 0) {
+    ui.alert('「' + CONFIG_SHEET_NAME + '」シートの' + CONFIG_LINKS_DATA_START_ROW +
+      '行目以降に案件ファイルのURLを入力してください。');
+    return;
+  }
+
+  var urls = configSheet.getRange(CONFIG_LINKS_DATA_START_ROW, 1, numRows, 1).getValues()
+    .map(function (row) { return String(row[0] || '').trim(); });
+
   var timeZone = ss.getSpreadsheetTimeZone();
-  var labelSs = getOrCreateLabelSpreadsheet_(ss, configSheet);
   var sizePreset = getLabelSizePreset_(configSheet);
 
-  var caseSheetNames = [];
-  var createdCases = [];
+  var currentCaseNames = [];
   var totalEntries = 0;
   var warnings = [];
-  ss.getSheets().forEach(function (sheet) {
-    var name = sheet.getName();
-    if (name === CONFIG_SHEET_NAME || name === LABEL_SHEET_NAME) {
+  urls.forEach(function (url) {
+    if (!url) {
       return;
     }
-    caseSheetNames.push(name);
+
+    var displayLabel = url;
     try {
-      var entries = collectLabelEntries_(sheet, timeZone);
-      if (entries.length === 0) {
+      var sourceSs = resolveLinkedSpreadsheet_(url);
+      displayLabel = sourceSs.getName();
+      var parsed = extractDateAndCompanyFromFileName_(displayLabel);
+
+      var sourceSheet = sourceSs.getSheetByName(tabName);
+      if (!sourceSheet) {
+        warnings.push(displayLabel + ' : タブ「' + tabName + '」が見つかりません');
         return;
       }
-      writeLabelSheetForCase_(labelSs, name, entries, sizePreset);
-      createdCases.push(name);
+
+      var entries = collectLabelEntries_(sourceSheet, timeZone);
+      if (entries.length === 0) {
+        warnings.push(displayLabel + ' : ラベルに出力できるデータがありません');
+        return;
+      }
+
+      // 前回実行分の同名タブは重複とみなさず再利用・上書きするため、
+      // 「今回すでに割り当てたタブ名」とだけ重複チェックする
+      var baseName = sanitizeSheetName_((parsed.date ? parsed.date + ' ' : '') + parsed.company);
+      var caseName = uniqueCaseNameForThisRun_(currentCaseNames, baseName);
+      currentCaseNames.push(caseName);
+
+      writeLabelSheetForCase_(ss, caseName, entries, sizePreset);
       totalEntries += entries.length;
     } catch (e) {
-      warnings.push(name + ': 処理中にエラーが発生しました（' + e.message + '）');
+      warnings.push(displayLabel + ' : 処理中にエラーが発生しました（' + e.message + '）');
     }
   });
 
-  removeStaleLabelSheets_(labelSs, caseSheetNames);
+  removeStaleLabelSheets_(ss, currentCaseNames);
 
-  if (createdCases.length === 0) {
+  if (currentCaseNames.length === 0) {
     ui.alert('ラベルに出力できる案件データが見つかりませんでした。');
   } else {
-    var message = createdCases.length + '件の案件・計' + totalEntries + '件のメニューから' +
+    var message = currentCaseNames.length + '件の案件・計' + totalEntries + '件のメニューから' +
       'ラベル' + (totalEntries * LABEL_COPIES_PER_ENTRY) + '枚を作成しました。\n' +
-      labelSs.getUrl();
+      currentCaseNames.join('\n');
     ui.alert('ラベル作成 結果', message, ui.ButtonSet.OK);
   }
 
@@ -437,50 +249,72 @@ function createLabels() {
 }
 
 /**
- * ラベル専用スプレッドシートを取得する。「設定」シートに保存済みのURL/IDがあれば
- * それを再利用し、なければ新規作成して同じ親フォルダに置き、IDを保存する。
+ * ファイル名から日付部分を抜き出し、日付テキストと残りの文字列（企業名。前後の
+ * 【】/[]は取り除く）を返す。対応する日付表記は以下の2パターン。
+ *   - 区切りあり: 区切り文字が `.` `/` `-` のいずれか、月日はゼロ埋めあり/なしの両方
+ *     （「2026.8.1」「2026/08/01」「2026-8-01」等）
+ *   - 区切りなし: `yyyyMMdd` の8桁連結表記で月日は常に2桁ゼロ埋め固定（「20260801」）
+ * 日付が見つからない場合、dateは空文字になりcompanyはファイル名そのまま（記号除去のみ）。
  */
-function getOrCreateLabelSpreadsheet_(ss, configSheet) {
-  var savedRaw = configSheet.getRange(CONFIG_LABEL_SS_CELL).getValue();
-  var savedId = savedRaw ? extractSpreadsheetId_(savedRaw) : '';
-  if (savedId) {
-    try {
-      return SpreadsheetApp.openById(savedId);
-    } catch (e) {
-      // 保存済みIDが無効（削除済みなど）の場合は新規作成にフォールバックする
-    }
+function extractDateAndCompanyFromFileName_(fileName) {
+  var m = fileName.match(/(^|\D)(\d{4})[./\-](\d{1,2})[./\-](\d{1,2})(\D|$)/) ||
+    fileName.match(/(^|\D)(\d{4})(\d{2})(\d{2})(\D|$)/);
+  if (!m) {
+    return { date: '', company: cleanCompanyText_(fileName) };
   }
+  var dateText = m[2] + '.' + Number(m[3]) + '.' + Number(m[4]);
+  var remaining = fileName.substring(0, m.index) + m[1] + m[5] +
+    fileName.substring(m.index + m[0].length);
+  return { date: dateText, company: cleanCompanyText_(remaining) };
+}
 
-  var labelSs = SpreadsheetApp.create(ss.getName() + LABEL_SPREADSHEET_SUFFIX);
-  try {
-    var parents = DriveApp.getFileById(ss.getId()).getParents();
-    if (parents.hasNext()) {
-      var parentFolder = parents.next();
-      var labelFile = DriveApp.getFileById(labelSs.getId());
-      parentFolder.addFile(labelFile);
-      DriveApp.getRootFolder().removeFile(labelFile);
-    }
-  } catch (e) {
-    // フォルダ移動に失敗してもマイドライブ直下に作成されているため処理は継続する
+/** ファイル名から前後の【】/[]などの記号を取り除く。 */
+function cleanCompanyText_(text) {
+  var original = String(text).trim();
+  var cleaned = original.replace(/^[【\[]\s*/, '').replace(/[】\]]\s*/, ' ').trim();
+  return cleaned || original;
+}
+
+function sanitizeSheetName_(name) {
+  var sanitized = String(name).replace(/[\[\]\*\?\/\\:]/g, '_').trim();
+  if (sanitized.length > 100) {
+    sanitized = sanitized.substring(0, 100);
   }
-
-  configSheet.getRange(CONFIG_LABEL_SS_CELL).setValue(labelSs.getId());
-  return labelSs;
+  return sanitized || 'シート';
 }
 
 /**
- * ラベル専用スプレッドシート内で、現在の案件タブ名に対応しないシートを削除する
+ * 今回の実行で既に割り当てたタブ名（currentCaseNames）とだけ重複チェックする。
+ * スプレッドシート全体の既存タブと比較しないのは、前回実行分の同名ラベルタブを
+ * 「再利用・上書き」対象として正しく扱うため（重複とみなして(2)付きの別タブを
+ * 作ってしまわないようにする）。今回の実行内で2つの案件が同じ名前になった
+ * 場合だけ(2)が付く。
+ */
+function uniqueCaseNameForThisRun_(currentCaseNames, baseName) {
+  var name = baseName;
+  var suffix = 2;
+  while (currentCaseNames.indexOf(name) !== -1) {
+    name = baseName + ' (' + suffix + ')';
+    suffix++;
+  }
+  return name;
+}
+
+/**
+ * ラベル専用タブに対応しない（今回のURL一覧に案件が存在しない）シートを削除する
  * （案件が削除・再作成された場合に古いラベルタブが残らないようにする）。
  */
-function removeStaleLabelSheets_(labelSs, currentCaseNames) {
-  deleteSheetsWhere_(labelSs, function (sheet) {
-    return currentCaseNames.indexOf(sheet.getName()) === -1;
+function removeStaleLabelSheets_(ss, currentCaseNames) {
+  deleteSheetsWhere_(ss, function (sheet) {
+    var name = sheet.getName();
+    return name !== CONFIG_SHEET_NAME && currentCaseNames.indexOf(name) === -1;
   });
 }
 
 /**
- * 案件タブ1枚分から、ラベルに出力するエントリ（日付・企業名・メニュー名・数量）を集める。
- * メニュー名・数量のどちらかが空の行はスキップする。
+ * リンク先ファイル内の指定タブ1枚分から、ラベルに出力するエントリ
+ * （日付・企業名・メニュー名・数量）を集める。メニュー名・数量のどちらかが
+ * 空の行はスキップする。
  */
 function collectLabelEntries_(sheet, timeZone) {
   var values = sheet.getDataRange().getValues();
@@ -553,21 +387,21 @@ function normalizeDateText_(text) {
 
 /**
  * 1案件分の entries を3列×N行（1件＝3段のセル。Nは「設定」シートで選んだ
- * sizePresetの行数）のグリッドに配置し、labelSs内の同名タブへ書き込む。
- * 1エントリにつき縦に隣接するLABEL_COPIES_PER_ENTRY枚（同一内容を複製）を
- * 配置し、1ページ分（3列×N行）ごとに次のブロック＝次ページへ折り返す。
+ * sizePresetの行数）のグリッドに配置し、このスプレッドシート内の同名タブへ
+ * 書き込む。1エントリにつき縦に隣接するLABEL_COPIES_PER_ENTRY枚（同一内容を
+ * 複製）を配置し、1ページ分（3列×N行）ごとに次のブロック＝次ページへ折り返す。
  * 既に同名タブがあれば中身だけ消して再利用するため、再実行しても古い内容は
  * 残らない（タブ自体を削除しないのは、印刷余白などタブに紐づく設定を
  * 失わないようにするため）。
  */
-function writeLabelSheetForCase_(labelSs, caseName, entries, sizePreset) {
+function writeLabelSheetForCase_(ss, caseName, entries, sizePreset) {
   // 削除して作り直すと、印刷余白などタブに紐づく設定が失われる可能性があるため、
   // 既存タブがあれば中身だけ消して（clear）再利用する。
-  var sheet = labelSs.getSheetByName(caseName);
+  var sheet = ss.getSheetByName(caseName);
   if (sheet) {
     sheet.clear();
   } else {
-    sheet = labelSs.insertSheet(caseName);
+    sheet = ss.insertSheet(caseName);
   }
 
   var labelRows = sizePreset.rows;
@@ -620,7 +454,7 @@ function writeLabelSheetForCase_(labelSs, caseName, entries, sizePreset) {
  *   1段目: 日付＋企業名＋「様」（左寄せ、WrapStrategy.CLIP＝折り返さず高さ固定。
  *          文字数が多い場合は折り返さず末尾が切れる）
  *   2段目: メニュー名（中央寄せ・1段目より2pt小さいフォント。
- *          WrapStrategy.WRAP＝2行まで折り返す。全角30文字
+ *          WrapStrategy.WRAP＝2行まで折り返す。全角文字数
  *          （LABEL_MENU_MAX_ZENKAKU_LEN）を超える分は事前に切り捨てているため、
  *          2行に収まりきらず段の高さが崩れることを防いでいる）
  *   3段目: 数量（中央寄せ・太字・大きめフォントで強調、WrapStrategy.CLIP）
@@ -674,7 +508,7 @@ function isHalfWidthChar_(ch) {
 }
 
 // ============================================================
-// 4. 共通ヘルパー
+// 3. 共通ヘルパー
 // ============================================================
 
 /**
