@@ -1,14 +1,15 @@
 /**
  * 「設定」シートに手入力した案件ファイルのURLを1件ずつ開き、ファイル名から
  * 案件実施日・企業名を読み取るとともに、リンク先ファイル内の指定タブから
- * 日付・企業名・メニュー名・数量を直接読み取って、このスプレッドシート自身に
- * 案件ごとの印刷用ラベル（A-oneラベルシール、設定で3×8/3×6を選択）タブを
- * 作成する。元の案件ファイルをコピーする工程は持たないため、スプレッドシートは
+ * 日付・企業名・メニュー名・数量を直接読み取って、印刷用ラベル（A-oneラベル
+ * シール、設定で3×8/3×6を選択）のHTMLを生成し、ブラウザの印刷機能で
+ * そのまま印刷できるダイアログを表示する。元の案件ファイルをコピーする工程も、
+ * スプレッドシートへラベルを書き込む工程も持たないため、スプレッドシートは
  * これ1枚だけで運用できる。
  *
  * ファイル構成:
  *   1. 設定シート関連
- *   2. リンクからのラベル作成
+ *   2. リンクからのラベル作成（HTML生成・印刷ダイアログ表示）
  *   3. 共通ヘルパー
  */
 
@@ -147,39 +148,37 @@ function onOpen() {
 // 総高さ271.2mmは共通で、8行と6行のどちらで均等に割るかだけが違う）
 var LABEL_COLS = 3;
 var LABEL_COPIES_PER_ENTRY = 2; // 同一ラベルを縦に2枚配置
-var LABEL_COL_WIDTH_MM = 66;    // ラベル1枚の実寸幅。商品が異なる場合は要調整
-var MM_TO_PX = 96 / 25.4;
+var LABEL_WIDTH_MM = 66;        // ラベル1枚の実寸幅。商品が異なる場合は要調整
 
 var LABEL_SIZE_3X8 = '3×8（66mm×33.9mm）';
 var LABEL_SIZE_3X6 = '3×6（66mm×45.2mm）';
 
-// 内訳（3段の高さpx）は、3×8は34/48/46（メニュー名の2行折り返しのため、数量段
-// からさらに2px減らしてメニュー名段に足した。合計128px＝33.9mm）、3×6は
-// 171px（＝45.2mm）を同じ比率で配分した45/64/62を初期値とする。
+// 内訳（3段の高さmm）は、3×8は9.0/12.7/12.2（メニュー名の2行分を広めに確保し、
+// 合計33.9mmに揃えた）、3×6は45.2mmを同じ比率で配分した11.9/16.9/16.4を
+// 初期値とする。
 var LABEL_SIZE_PRESETS = {};
-LABEL_SIZE_PRESETS[LABEL_SIZE_3X8] = { rows: 8, subrowHeightsPx: [34, 48, 46] };
-LABEL_SIZE_PRESETS[LABEL_SIZE_3X6] = { rows: 6, subrowHeightsPx: [45, 64, 62] };
+LABEL_SIZE_PRESETS[LABEL_SIZE_3X8] = { rows: 8, labelHeightMm: 33.9, segmentHeightsMm: [9.0, 12.7, 12.2] };
+LABEL_SIZE_PRESETS[LABEL_SIZE_3X6] = { rows: 6, labelHeightMm: 45.2, segmentHeightsMm: [11.9, 16.9, 16.4] };
 
 /**
- * 「設定」シートB3で選択されたラベルサイズのプリセット（行数・3段の高さpx）を返す。
- * 未選択・不正な値の場合は3×8（従来のデフォルト）を返す。
+ * 「設定」シートB3で選択されたラベルサイズのプリセット（行数・ラベル高さmm・
+ * 3段の高さmm）を返す。未選択・不正な値の場合は3×8（従来のデフォルト）を返す。
  */
 function getLabelSizePreset_(configSheet) {
   var raw = String(configSheet.getRange(CONFIG_LABEL_SIZE_CELL).getValue() || '').trim();
   return LABEL_SIZE_PRESETS[raw] || LABEL_SIZE_PRESETS[LABEL_SIZE_3X8];
 }
 
-var LABEL_FONT_SIZE = 14;      // 1段目（日付＋企業名）のフォントサイズ
+var LABEL_FONT_SIZE = 14;      // 1段目（日付＋企業名）のフォントサイズ(pt)
 var LABEL_MENU_FONT_SIZE = 12; // 2段目（メニュー名）。1段目より2pt小さい
 var LABEL_QTY_FONT_SIZE = 25;  // 3段目（数量）。太字・大きめフォントで強調する
-var LABEL_MENU_MAX_ZENKAKU_LEN = 28; // 2段目（メニュー名）は全角換算でこの文字数を超えたら切り捨てる
 
 /**
  * メニュー「ラベル作成」→「作成」から呼び出されるメイン関数。
  * 「設定」シートのURL一覧を1件ずつ開き、リンク先ファイル内の指定タブから
- * 直接（コピーせずに）日付・企業名・メニュー名・数量を読み取り、このスプレッド
- * シート自身に案件ごとのラベルタブを作成する。実行のたびに、今回のURL一覧に
- * 対応しなくなった古いラベルタブは削除される。
+ * 直接（コピーせずに）日付・企業名・メニュー名・数量を読み取り、案件ごとの
+ * 結果をまとめてHTMLの印刷用ダイアログを表示する（スプレッドシートへの
+ * 書き込みは行わない）。
  */
 function createLabels() {
   var ui = SpreadsheetApp.getUi();
@@ -207,7 +206,7 @@ function createLabels() {
   var timeZone = ss.getSpreadsheetTimeZone();
   var sizePreset = getLabelSizePreset_(configSheet);
 
-  var currentCaseNames = [];
+  var caseResults = [];
   var totalEntries = 0;
   var warnings = [];
   urls.forEach(function (url) {
@@ -233,34 +232,27 @@ function createLabels() {
         return;
       }
 
-      // 前回実行分の同名タブは重複とみなさず再利用・上書きするため、
-      // 「今回すでに割り当てたタブ名」とだけ重複チェックする
-      var baseName = sanitizeSheetName_((parsed.date ? parsed.date + ' ' : '') + parsed.company);
-      var caseName = uniqueCaseNameForThisRun_(currentCaseNames, baseName);
-      currentCaseNames.push(caseName);
-
-      writeLabelSheetForCase_(ss, caseName, entries, sizePreset);
+      var caseLabel = ((parsed.date ? parsed.date + ' ' : '') + parsed.company).trim();
+      caseResults.push({ caseLabel: caseLabel, entries: entries });
       totalEntries += entries.length;
     } catch (e) {
       warnings.push(displayLabel + ' : 処理中にエラーが発生しました（' + e.message + '）');
     }
   });
 
-  removeStaleLabelSheets_(ss, currentCaseNames);
-
-  if (currentCaseNames.length === 0) {
-    ui.alert('ラベルに出力できる案件データが見つかりませんでした。');
-  } else {
-    var message = currentCaseNames.length + '件の案件・計' + totalEntries + '件のメニューから' +
-      'ラベル' + (totalEntries * LABEL_COPIES_PER_ENTRY) + '枚を作成しました。\n' +
-      currentCaseNames.join('\n');
-    ui.alert('ラベル作成 結果', message, ui.ButtonSet.OK);
-  }
-
-  // 警告・エラーは通常の結果に埋もれて見落とされないよう、別ダイアログで目立たせて表示する
+  // 警告・エラーは印刷ダイアログに埋もれて見落とされないよう、先に表示する
   if (warnings.length > 0) {
     ui.alert('⚠️要確認', warnings.join('\n'), ui.ButtonSet.OK);
   }
+
+  if (caseResults.length === 0) {
+    ui.alert('ラベルに出力できる案件データが見つかりませんでした。');
+    return;
+  }
+
+  var html = buildLabelsHtml_(caseResults, sizePreset);
+  var output = HtmlService.createHtmlOutput(html).setWidth(850).setHeight(650);
+  ui.showModalDialog(output, 'ラベル印刷（' + caseResults.length + '件の案件・計' + totalEntries + '件のメニュー）');
 }
 
 /**
@@ -288,42 +280,6 @@ function cleanCompanyText_(text) {
   var original = String(text).trim();
   var cleaned = original.replace(/^[【\[]\s*/, '').replace(/[】\]]\s*/, ' ').trim();
   return cleaned || original;
-}
-
-function sanitizeSheetName_(name) {
-  var sanitized = String(name).replace(/[\[\]\*\?\/\\:]/g, '_').trim();
-  if (sanitized.length > 100) {
-    sanitized = sanitized.substring(0, 100);
-  }
-  return sanitized || 'シート';
-}
-
-/**
- * 今回の実行で既に割り当てたタブ名（currentCaseNames）とだけ重複チェックする。
- * スプレッドシート全体の既存タブと比較しないのは、前回実行分の同名ラベルタブを
- * 「再利用・上書き」対象として正しく扱うため（重複とみなして(2)付きの別タブを
- * 作ってしまわないようにする）。今回の実行内で2つの案件が同じ名前になった
- * 場合だけ(2)が付く。
- */
-function uniqueCaseNameForThisRun_(currentCaseNames, baseName) {
-  var name = baseName;
-  var suffix = 2;
-  while (currentCaseNames.indexOf(name) !== -1) {
-    name = baseName + ' (' + suffix + ')';
-    suffix++;
-  }
-  return name;
-}
-
-/**
- * ラベル専用タブに対応しない（今回のURL一覧に案件が存在しない）シートを削除する
- * （案件が削除・再作成された場合に古いラベルタブが残らないようにする）。
- */
-function removeStaleLabelSheets_(ss, currentCaseNames) {
-  deleteSheetsWhere_(ss, function (sheet) {
-    var name = sheet.getName();
-    return name !== CONFIG_SHEET_NAME && currentCaseNames.indexOf(name) === -1;
-  });
 }
 
 /**
@@ -409,146 +365,167 @@ function normalizeDateText_(text) {
   return text;
 }
 
+/** HTML文字列に埋め込むテキストをエスケープする（& < > " ' の5文字）。 */
+function escapeHtml_(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /**
- * 1案件分の entries を3列×N行（1件＝3段のセル。Nは「設定」シートで選んだ
- * sizePresetの行数）のグリッドに配置し、このスプレッドシート内の同名タブへ
- * 書き込む。1エントリにつき縦に隣接するLABEL_COPIES_PER_ENTRY枚（同一内容を
- * 複製）を配置し、1ページ分（3列×N行）ごとに次のブロック＝次ページへ折り返す。
- * 既に同名タブがあれば中身だけ消して再利用するため、再実行しても古い内容は
- * 残らない（タブ自体を削除しないのは、印刷余白などタブに紐づく設定を
- * 失わないようにするため）。
+ * ラベル印刷ダイアログの<style>ブロックを返す。グリッドの行列数をラベル
+ * サイズプリセット通りに固定し、`grid-auto-flow: column`でセルを出現順に
+ * 流し込むだけで「1列を上から下まで埋めてから次の列へ」という面付け順を
+ * 再現する（Sheets時代の空セル事前書き込みのような回避策が不要になる）。
  */
-function writeLabelSheetForCase_(ss, caseName, entries, sizePreset) {
-  // 削除して作り直すと、印刷余白などタブに紐づく設定が失われる可能性があるため、
-  // 既存タブがあれば中身だけ消して（clear）再利用する。
-  var sheet = ss.getSheetByName(caseName);
-  if (sheet) {
-    sheet.clear();
-  } else {
-    sheet = ss.insertSheet(caseName);
-  }
+function buildLabelStyle_(sizePreset) {
+  var segmentHeights = sizePreset.segmentHeightsMm;
+  return '' +
+    '<style>' +
+    'body { margin: 0; font-family: sans-serif; }' +
+    '.toolbar { padding: 12px 16px; background: #f2f2f2; font-size: 14px; }' +
+    '.toolbar button { font-size: 14px; padding: 6px 16px; margin-right: 8px; }' +
+    '.case-title { margin: 16px 16px 0; font-size: 14px; color: #555; }' +
+    '.label-page {' +
+    '  display: grid;' +
+    '  grid-template-columns: repeat(' + LABEL_COLS + ', ' + LABEL_WIDTH_MM + 'mm);' +
+    '  grid-template-rows: repeat(' + sizePreset.rows + ', ' + sizePreset.labelHeightMm + 'mm);' +
+    '  grid-auto-flow: column;' +
+    '  margin: 8px;' +
+    '}' +
+    '.label-page.page-break { break-after: page; page-break-after: always; }' +
+    '.label-cell { display: flex; flex-direction: column; border: 1px solid #f2f2f2; box-sizing: border-box; }' +
+    '.label-seg1 {' +
+    '  height: ' + segmentHeights[0] + 'mm;' +
+    '  font-size: ' + LABEL_FONT_SIZE + 'pt;' +
+    '  font-weight: bold;' +
+    '  white-space: nowrap;' +
+    '  overflow: hidden;' +
+    '  display: flex;' +
+    '  align-items: flex-end;' +
+    '  padding: 0 2px;' +
+    '  box-sizing: border-box;' +
+    '}' +
+    '.label-seg2 {' +
+    '  height: ' + segmentHeights[1] + 'mm;' +
+    '  font-size: ' + LABEL_MENU_FONT_SIZE + 'pt;' +
+    '  font-weight: bold;' +
+    '  text-align: center;' +
+    '  display: -webkit-box;' +
+    '  -webkit-box-orient: vertical;' +
+    '  -webkit-box-pack: center;' +
+    '  -webkit-line-clamp: 2;' +
+    '  overflow: hidden;' +
+    '  padding: 0 2px;' +
+    '  box-sizing: border-box;' +
+    '}' +
+    '.label-seg3 {' +
+    '  height: ' + segmentHeights[2] + 'mm;' +
+    '  font-size: ' + LABEL_QTY_FONT_SIZE + 'pt;' +
+    '  font-weight: bold;' +
+    '  display: flex;' +
+    '  align-items: center;' +
+    '  justify-content: center;' +
+    '  box-sizing: border-box;' +
+    '}' +
+    '@media print { .no-print { display: none; } }' +
+    '@page { margin: 0; }' +
+    '</style>';
+}
 
-  var labelRows = sizePreset.rows;
-  var subrowHeightsPx = sizePreset.subrowHeightsPx;
-  var subrows = subrowHeightsPx.length;
+/**
+ * ラベル1件分（3段）のHTMLを返す。
+ *   1段目: 日付＋企業名＋「様」（左寄せ・下揃え、nowrap+overflow:hiddenで
+ *          折り返さず末尾を切る。旧WrapStrategy.CLIPの挙動を再現する）
+ *   2段目: メニュー名（中央寄せ、-webkit-line-clamp:2で2行まで表示し、
+ *          超えた分は省略記号「…」で省略する）
+ *   3段目: 数量（中央寄せ・太字・大きめフォントで強調）
+ */
+function buildLabelCellHtml_(entry) {
+  var line1 = escapeHtml_(entry.date + ' ' + entry.company + ' 様');
+  var line2 = escapeHtml_(entry.menu);
+  var line3 = escapeHtml_(String(entry.qty));
+  return '' +
+    '<div class="label-cell">' +
+    '<div class="label-seg1">' + line1 + '</div>' +
+    '<div class="label-seg2">' + line2 + '</div>' +
+    '<div class="label-seg3">' + line3 + '</div>' +
+    '</div>';
+}
 
-  var entriesPerColumn = Math.floor(labelRows / LABEL_COPIES_PER_ENTRY);
+/**
+ * 1案件分のentriesを、1ページ分（LABEL_COLS × sizePreset.rows）ごとの
+ * ページHTML文字列（`.label-page`の<div>）の配列に分割する。1エントリにつき
+ * LABEL_COPIES_PER_ENTRY枚（同一内容を複製）を連続して配置し、
+ * `grid-auto-flow: column`によって1列を上から埋めてから次の列へという順で
+ * 面付けされる。
+ */
+function buildCasePages_(entries, sizePreset) {
+  var entriesPerColumn = Math.floor(sizePreset.rows / LABEL_COPIES_PER_ENTRY);
   var entriesPerPage = entriesPerColumn * LABEL_COLS;
-  var totalPages = Math.ceil(entries.length / entriesPerPage);
-  var totalRows = totalPages * labelRows * subrows;
-
-  // 最終ページで3列目が1件も埋まらないと、その列が空のままになり印刷範囲が
-  // 2列分に縮んで中央寄せがずれてしまう。先に全セルへ空文字列の値を入れておくことに加え、
-  // 薄い罫線も引いておくことで、3列とも「データがある列」として印刷範囲に確実に
-  // 含まれるようにする（実データは後段の書き込みで上書きされる）
-  sheet.getRange(1, 1, totalRows, LABEL_COLS)
-    .setValue('')
-    .setFontSize(LABEL_FONT_SIZE)
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP)
-    .setBorder(true, true, true, true, true, true, '#f2f2f2', SpreadsheetApp.BorderStyle.SOLID);
-
-  var index = 0;
-  for (var page = 0; page < totalPages; page++) {
-    for (var col = 0; col < LABEL_COLS; col++) {
-      for (var slot = 0; slot < entriesPerColumn; slot++) {
-        if (index >= entries.length) {
-          break;
-        }
-        var entry = entries[index++];
-        for (var copy = 0; copy < LABEL_COPIES_PER_ENTRY; copy++) {
-          var physicalSlot = slot * LABEL_COPIES_PER_ENTRY + copy;
-          var rowBase = page * labelRows * subrows + physicalSlot * subrows;
-          writeLabelCellGroup_(sheet, rowBase, col + 1, entry);
-        }
+  var pages = [];
+  for (var i = 0; i < entries.length; i += entriesPerPage) {
+    var pageEntries = entries.slice(i, i + entriesPerPage);
+    var cellsHtml = [];
+    pageEntries.forEach(function (entry) {
+      for (var copy = 0; copy < LABEL_COPIES_PER_ENTRY; copy++) {
+        cellsHtml.push(buildLabelCellHtml_(entry));
       }
-    }
+    });
+    pages.push('<div class="label-page">' + cellsHtml.join('') + '</div>');
   }
-
-  for (var col1 = 1; col1 <= LABEL_COLS; col1++) {
-    sheet.setColumnWidth(col1, Math.round(LABEL_COL_WIDTH_MM * MM_TO_PX));
-  }
-  for (var r = 0; r < totalRows; r++) {
-    var subIndex = r % subrows;
-    sheet.setRowHeight(r + 1, subrowHeightsPx[subIndex]);
-  }
+  return pages;
 }
 
 /**
- * ラベル1件分（3段）を書き込む。
- *   1段目: 日付＋企業名＋「様」（左寄せ、WrapStrategy.CLIP＝折り返さず高さ固定。
- *          文字数が多い場合は折り返さず末尾が切れる）
- *   2段目: メニュー名（中央寄せ・1段目より2pt小さいフォント。
- *          WrapStrategy.WRAP＝2行まで折り返す。全角文字数
- *          （LABEL_MENU_MAX_ZENKAKU_LEN）を超える分は事前に切り捨てているため、
- *          2行に収まりきらず段の高さが崩れることを防いでいる）
- *   3段目: 数量（中央寄せ・太字・大きめフォントで強調、WrapStrategy.CLIP）
+ * 印刷用ダイアログに表示するHTML文書全体を返す。案件ごとに画面確認用の
+ * 見出し（no-print・印刷時は非表示）と、buildCasePages_で得たページを出力し、
+ * 文書全体で最後のページ以外には改ページを付与する（最後のページに付けると
+ * 余分な空白ページが印刷されてしまうため）。
  */
-function writeLabelCellGroup_(sheet, rowBase, col1, entry) {
-  sheet.getRange(rowBase + 1, col1).setValue(entry.date + ' ' + entry.company + ' 様')
-    .setFontSize(LABEL_FONT_SIZE)
-    .setFontWeight('bold')
-    .setHorizontalAlignment('left')
-    .setVerticalAlignment('bottom')
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+function buildLabelsHtml_(caseResults, sizePreset) {
+  var allPages = [];
+  caseResults.forEach(function (caseResult) {
+    allPages.push(
+      '<div class="case-title no-print">' + escapeHtml_(caseResult.caseLabel) +
+      '（' + caseResult.entries.length + '件）</div>'
+    );
+    buildCasePages_(caseResult.entries, sizePreset).forEach(function (pageHtml) {
+      allPages.push(pageHtml);
+    });
+  });
 
-  sheet.getRange(rowBase + 2, col1).setValue(truncateByZenkakuWidth_(entry.menu, LABEL_MENU_MAX_ZENKAKU_LEN))
-    .setFontSize(LABEL_MENU_FONT_SIZE)
-    .setFontWeight('bold')
-    .setHorizontalAlignment('center')
-    .setVerticalAlignment('middle')
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
-
-  sheet.getRange(rowBase + 3, col1).setValue(entry.qty)
-    .setFontSize(LABEL_QTY_FONT_SIZE)
-    .setFontWeight('bold')
-    .setHorizontalAlignment('center')
-    .setVerticalAlignment('middle')
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
-}
-
-/**
- * 文字列を全角換算で指定した文字数までに切り詰める（半角文字は0.5文字分として
- * カウントする）。超えた分は末尾を単純に切り捨てる（省略記号は付けない）。
- */
-function truncateByZenkakuWidth_(text, maxZenkakuWidth) {
-  var result = '';
-  var width = 0;
-  for (var i = 0; i < text.length; i++) {
-    var ch = text.charAt(i);
-    var charWidth = isHalfWidthChar_(ch) ? 0.5 : 1;
-    if (width + charWidth > maxZenkakuWidth) {
+  var lastPageIndex = -1;
+  for (var i = allPages.length - 1; i >= 0; i--) {
+    if (allPages[i].indexOf('class="label-page"') !== -1) {
+      lastPageIndex = i;
       break;
     }
-    result += ch;
-    width += charWidth;
   }
-  return result;
-}
+  for (var j = 0; j < allPages.length; j++) {
+    if (j !== lastPageIndex && allPages[j].indexOf('class="label-page"') !== -1) {
+      allPages[j] = allPages[j].replace('class="label-page"', 'class="label-page page-break"');
+    }
+  }
 
-/** 半角英数・記号（U+0000〜U+00FF）、半角カタカナ（U+FF61〜U+FF9F）を半角とみなす。 */
-function isHalfWidthChar_(ch) {
-  var code = ch.charCodeAt(0);
-  return (code >= 0x0000 && code <= 0x00FF) || (code >= 0xFF61 && code <= 0xFF9F);
+  return '' +
+    '<!doctype html><html><head><meta charset="utf-8">' +
+    buildLabelStyle_(sizePreset) +
+    '</head><body>' +
+    '<div class="toolbar no-print">' +
+    '<button onclick="window.print()">印刷</button>' +
+    '<span>プレビューを確認してから印刷してください（用紙サイズ・余白はブラウザの印刷ダイアログで調整できます）。</span>' +
+    '</div>' +
+    allPages.join('') +
+    '</body></html>';
 }
 
 // ============================================================
 // 3. 共通ヘルパー
 // ============================================================
-
-/**
- * spreadsheet内のシートのうち、shouldDelete(sheet)がtrueを返すものを削除する。
- * ただし最低1枚はシートを残す（スプレッドシートは全シート削除できないため）。
- */
-function deleteSheetsWhere_(spreadsheet, shouldDelete) {
-  var sheets = spreadsheet.getSheets();
-  var remaining = sheets.length;
-  sheets.forEach(function (sheet) {
-    if (shouldDelete(sheet) && remaining > 1) {
-      spreadsheet.deleteSheet(sheet);
-      remaining--;
-    }
-  });
-}
 
 /**
  * 値の2次元配列からメニュー表のヘッダー行（「メニュー名」を含む行）を探し、
