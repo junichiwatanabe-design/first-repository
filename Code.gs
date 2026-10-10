@@ -432,7 +432,7 @@ body { margin: 0; font-family: sans-serif; }
  * エントリ一覧をJSONデータとして埋め込み、ブラウザ側のスクリプトで
  * 都度計算・描画する（「開始位置」「ずれ補正」の入力値が変わるたびに
  * サーバーへ問い合わせず即座に再描画できるようにするため）。
- * `<`を`<`に置き換えてから埋め込むのは、メニュー名等に`</script`が
+ * `<`を`\u003C`に置き換えてから埋め込むのは、メニュー名等に`</script`が
  * 含まれていてもスクリプトタグが途中で閉じられないようにするため。
  */
 function buildLabelsHtml_(caseResults, sizePreset) {
@@ -618,9 +618,9 @@ function extractSpreadsheetId_(input) {
 
 /**
  * 「設定」シートのA列（案件ファイルのリンク一覧）の値からスプレッドシートを
- * 取得する。URL・IDに加えて、
- * リンクの代わりにファイル名がそのまま貼られてしまった場合の救済策として、
- * Drive内をそのファイル名で検索して開くこともできる。
+ * 取得する。URL・IDに加えて、リンクの代わりにファイル名がそのまま貼られて
+ * しまった場合の救済策として、Drive内をそのファイル名で検索して開くことも
+ * できる。
  */
 function resolveLinkedSpreadsheet_(input) {
   var id = extractSpreadsheetId_(input);
