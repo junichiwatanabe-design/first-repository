@@ -207,7 +207,6 @@ function createLabels() {
   var sizePreset = getLabelSizePreset_(configSheet);
 
   var caseResults = [];
-  var totalEntries = 0;
   var warnings = [];
   urls.forEach(function (url) {
     if (!url) {
@@ -234,7 +233,6 @@ function createLabels() {
 
       var caseLabel = ((parsed.date ? parsed.date + ' ' : '') + parsed.company).trim();
       caseResults.push({ caseLabel: caseLabel, entries: entries });
-      totalEntries += entries.length;
     } catch (e) {
       warnings.push(displayLabel + ' : 処理中にエラーが発生しました（' + e.message + '）');
     }
@@ -252,7 +250,7 @@ function createLabels() {
 
   var html = buildLabelsHtml_(caseResults, sizePreset);
   var output = HtmlService.createHtmlOutput(html).setWidth(850).setHeight(650);
-  ui.showModalDialog(output, 'ラベル印刷（' + caseResults.length + '件の案件・計' + totalEntries + '件のメニュー）');
+  ui.showModalDialog(output, `ラベル印刷（${caseResults.length}件の案件）`);
 }
 
 /**
@@ -365,8 +363,100 @@ function normalizeDateText_(text) {
   return text;
 }
 
-/** HTML文字列に埋め込むテキストをエスケープする（& < > " ' の5文字）。 */
-function escapeHtml_(text) {
+/**
+ * ラベル印刷ダイアログの<style>ブロックを返す。グリッドの行列数をラベル
+ * サイズプリセット通りに固定し、`grid-auto-flow: column`でセルを出現順に
+ * 流し込むだけで「1列を上から下まで埋めてから次の列へ」という面付け順を
+ * 再現する（空セル事前書き込みのような回避策が不要になる）。
+ */
+function buildLabelStyle_(sizePreset) {
+  var h = sizePreset.segmentHeightsMm;
+  return `<style>
+body { margin: 0; font-family: sans-serif; }
+.toolbar { padding: 12px 16px; background: #f2f2f2; font-size: 14px; }
+.toolbar button { font-size: 14px; padding: 6px 16px; margin-right: 16px; }
+.toolbar label { margin-right: 16px; }
+.toolbar input { width: 48px; font-size: 14px; padding: 2px 4px; margin: 0 2px; }
+#count { color: #555; }
+.case-title { margin: 16px 16px 0; font-size: 14px; color: #555; }
+.label-page {
+  display: grid;
+  grid-template-columns: repeat(${LABEL_COLS}, ${LABEL_WIDTH_MM}mm);
+  grid-template-rows: repeat(${sizePreset.rows}, ${sizePreset.labelHeightMm}mm);
+  grid-auto-flow: column;
+  margin: 8px;
+}
+.label-page.page-break { break-after: page; page-break-after: always; }
+.label-cell { display: flex; flex-direction: column; border: 1px solid #f2f2f2; box-sizing: border-box; }
+.label-seg1 {
+  height: ${h[0]}mm;
+  font-size: ${LABEL_FONT_SIZE}pt;
+  font-weight: bold;
+  white-space: nowrap;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 2px;
+  box-sizing: border-box;
+}
+.label-seg2 {
+  height: ${h[1]}mm;
+  font-size: ${LABEL_MENU_FONT_SIZE}pt;
+  font-weight: bold;
+  text-align: center;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-box-pack: center;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  padding: 0 2px;
+  box-sizing: border-box;
+}
+.label-seg3 {
+  height: ${h[2]}mm;
+  font-size: ${LABEL_QTY_FONT_SIZE}pt;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+@media print { .no-print { display: none; } }
+@page { margin: 0; }
+</style>`;
+}
+
+/**
+ * 印刷用ダイアログに表示するHTML文書全体を返す。実際のページ割り（面付け・
+ * 開始位置のずらし・ずれ補正の反映）はApps Script側では行わず、案件・
+ * エントリ一覧をJSONデータとして埋め込み、ブラウザ側のスクリプトで
+ * 都度計算・描画する（「開始位置」「ずれ補正」の入力値が変わるたびに
+ * サーバーへ問い合わせず即座に再描画できるようにするため）。
+ * `<`を`<`に置き換えてから埋め込むのは、メニュー名等に`</script`が
+ * 含まれていてもスクリプトタグが途中で閉じられないようにするため。
+ */
+function buildLabelsHtml_(caseResults, sizePreset) {
+  var dataJson = JSON.stringify({
+    cases: caseResults,
+    rows: sizePreset.rows,
+    cols: LABEL_COLS,
+    copies: LABEL_COPIES_PER_ENTRY
+  }).replace(/</g, '\\u003C');
+
+  return `<!doctype html><html><head><meta charset="utf-8">
+${buildLabelStyle_(sizePreset)}
+</head><body>
+<div class="toolbar no-print">
+<button id="printBtn">印刷</button>
+<label>開始位置 <input id="startPosition" type="number" min="1" value="1"> 枚目から</label>
+<label>ずれ補正 横<input id="offsetX" type="number" step="0.5" value="0">mm 縦<input id="offsetY" type="number" step="0.5" value="0">mm</label>
+<span id="count"></span>
+</div>
+<div id="pages"></div>
+<script>
+var PRINT_DATA = ${dataJson};
+
+function escapeHtml(text) {
   return String(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -375,152 +465,94 @@ function escapeHtml_(text) {
     .replace(/'/g, '&#39;');
 }
 
-/**
- * ラベル印刷ダイアログの<style>ブロックを返す。グリッドの行列数をラベル
- * サイズプリセット通りに固定し、`grid-auto-flow: column`でセルを出現順に
- * 流し込むだけで「1列を上から下まで埋めてから次の列へ」という面付け順を
- * 再現する（Sheets時代の空セル事前書き込みのような回避策が不要になる）。
- */
-function buildLabelStyle_(sizePreset) {
-  var segmentHeights = sizePreset.segmentHeightsMm;
-  return '' +
-    '<style>' +
-    'body { margin: 0; font-family: sans-serif; }' +
-    '.toolbar { padding: 12px 16px; background: #f2f2f2; font-size: 14px; }' +
-    '.toolbar button { font-size: 14px; padding: 6px 16px; margin-right: 8px; }' +
-    '.case-title { margin: 16px 16px 0; font-size: 14px; color: #555; }' +
-    '.label-page {' +
-    '  display: grid;' +
-    '  grid-template-columns: repeat(' + LABEL_COLS + ', ' + LABEL_WIDTH_MM + 'mm);' +
-    '  grid-template-rows: repeat(' + sizePreset.rows + ', ' + sizePreset.labelHeightMm + 'mm);' +
-    '  grid-auto-flow: column;' +
-    '  margin: 8px;' +
-    '}' +
-    '.label-page.page-break { break-after: page; page-break-after: always; }' +
-    '.label-cell { display: flex; flex-direction: column; border: 1px solid #f2f2f2; box-sizing: border-box; }' +
-    '.label-seg1 {' +
-    '  height: ' + segmentHeights[0] + 'mm;' +
-    '  font-size: ' + LABEL_FONT_SIZE + 'pt;' +
-    '  font-weight: bold;' +
-    '  white-space: nowrap;' +
-    '  overflow: hidden;' +
-    '  display: flex;' +
-    '  align-items: flex-end;' +
-    '  padding: 0 2px;' +
-    '  box-sizing: border-box;' +
-    '}' +
-    '.label-seg2 {' +
-    '  height: ' + segmentHeights[1] + 'mm;' +
-    '  font-size: ' + LABEL_MENU_FONT_SIZE + 'pt;' +
-    '  font-weight: bold;' +
-    '  text-align: center;' +
-    '  display: -webkit-box;' +
-    '  -webkit-box-orient: vertical;' +
-    '  -webkit-box-pack: center;' +
-    '  -webkit-line-clamp: 2;' +
-    '  overflow: hidden;' +
-    '  padding: 0 2px;' +
-    '  box-sizing: border-box;' +
-    '}' +
-    '.label-seg3 {' +
-    '  height: ' + segmentHeights[2] + 'mm;' +
-    '  font-size: ' + LABEL_QTY_FONT_SIZE + 'pt;' +
-    '  font-weight: bold;' +
-    '  display: flex;' +
-    '  align-items: center;' +
-    '  justify-content: center;' +
-    '  box-sizing: border-box;' +
-    '}' +
-    '@media print { .no-print { display: none; } }' +
-    '@page { margin: 0; }' +
-    '</style>';
+function expandEntries(entries, copies) {
+  var out = [];
+  entries.forEach(function (entry) {
+    for (var i = 0; i < copies; i++) out.push(entry);
+  });
+  return out;
 }
 
-/**
- * ラベル1件分（3段）のHTMLを返す。
- *   1段目: 日付＋企業名＋「様」（左寄せ・下揃え、nowrap+overflow:hiddenで
- *          折り返さず末尾を切る。旧WrapStrategy.CLIPの挙動を再現する）
- *   2段目: メニュー名（中央寄せ、-webkit-line-clamp:2で2行まで表示し、
- *          超えた分は省略記号「…」で省略する）
- *   3段目: 数量（中央寄せ・太字・大きめフォントで強調）
- */
-function buildLabelCellHtml_(entry) {
-  var line1 = escapeHtml_(entry.date + ' ' + entry.company + ' 様');
-  var line2 = escapeHtml_(entry.menu);
-  var line3 = escapeHtml_(String(entry.qty));
-  return '' +
-    '<div class="label-cell">' +
+// 先頭の案件のみ、開始位置の分だけ空プレースホルダ（null）を先頭に挿入してから
+// 1ページ分（rows*cols件）ごとに分割する。totalLabelsは開始位置の影響を受けない
+// 実データ数。
+function buildPagesData(cases, startPosition, rows, cols, copies) {
+  var perPage = rows * cols;
+  var totalLabels = 0;
+  var caseBlocks = cases.map(function (c, caseIndex) {
+    var cells = expandEntries(c.entries, copies);
+    totalLabels += cells.length;
+    if (caseIndex === 0) {
+      var leading = Math.max(startPosition - 1, 0);
+      cells = new Array(leading).fill(null).concat(cells);
+    }
+    var pageCells = [];
+    for (var i = 0; i < cells.length; i += perPage) {
+      pageCells.push(cells.slice(i, i + perPage));
+    }
+    return { caseLabel: c.caseLabel, entryCount: c.entries.length, pageCells: pageCells };
+  });
+  return { caseBlocks: caseBlocks, totalLabels: totalLabels };
+}
+
+function buildLabelCellHtml(entry) {
+  if (!entry) {
+    return '<div class="label-cell"></div>';
+  }
+  var line1 = escapeHtml(entry.date + ' ' + entry.company + ' 様');
+  var line2 = escapeHtml(entry.menu);
+  var line3 = escapeHtml(String(entry.qty));
+  return '<div class="label-cell">' +
     '<div class="label-seg1">' + line1 + '</div>' +
     '<div class="label-seg2">' + line2 + '</div>' +
     '<div class="label-seg3">' + line3 + '</div>' +
     '</div>';
 }
 
-/**
- * 1案件分のentriesを、1ページ分（LABEL_COLS × sizePreset.rows）ごとの
- * ページHTML文字列（`.label-page`の<div>）の配列に分割する。1エントリにつき
- * LABEL_COPIES_PER_ENTRY枚（同一内容を複製）を連続して配置し、
- * `grid-auto-flow: column`によって1列を上から埋めてから次の列へという順で
- * 面付けされる。
- */
-function buildCasePages_(entries, sizePreset) {
-  var entriesPerColumn = Math.floor(sizePreset.rows / LABEL_COPIES_PER_ENTRY);
-  var entriesPerPage = entriesPerColumn * LABEL_COLS;
-  var pages = [];
-  for (var i = 0; i < entries.length; i += entriesPerPage) {
-    var pageEntries = entries.slice(i, i + entriesPerPage);
-    var cellsHtml = [];
-    pageEntries.forEach(function (entry) {
-      for (var copy = 0; copy < LABEL_COPIES_PER_ENTRY; copy++) {
-        cellsHtml.push(buildLabelCellHtml_(entry));
-      }
-    });
-    pages.push('<div class="label-page">' + cellsHtml.join('') + '</div>');
-  }
-  return pages;
-}
+function render() {
+  var startPosition = Math.max(parseInt(document.getElementById('startPosition').value, 10) || 1, 1);
+  var offsetX = parseFloat(document.getElementById('offsetX').value) || 0;
+  var offsetY = parseFloat(document.getElementById('offsetY').value) || 0;
 
-/**
- * 印刷用ダイアログに表示するHTML文書全体を返す。案件ごとに画面確認用の
- * 見出し（no-print・印刷時は非表示）と、buildCasePages_で得たページを出力し、
- * 文書全体で最後のページ以外には改ページを付与する（最後のページに付けると
- * 余分な空白ページが印刷されてしまうため）。
- */
-function buildLabelsHtml_(caseResults, sizePreset) {
-  var allPages = [];
-  caseResults.forEach(function (caseResult) {
-    allPages.push(
-      '<div class="case-title no-print">' + escapeHtml_(caseResult.caseLabel) +
-      '（' + caseResult.entries.length + '件）</div>'
-    );
-    buildCasePages_(caseResult.entries, sizePreset).forEach(function (pageHtml) {
-      allPages.push(pageHtml);
+  var data = buildPagesData(PRINT_DATA.cases, startPosition, PRINT_DATA.rows, PRINT_DATA.cols, PRINT_DATA.copies);
+
+  var allPagesHtml = [];
+  data.caseBlocks.forEach(function (block) {
+    allPagesHtml.push('<div class="case-title no-print">' + escapeHtml(block.caseLabel) + '（' + block.entryCount + '件）</div>');
+    block.pageCells.forEach(function (cells) {
+      allPagesHtml.push('<div class="label-page">' + cells.map(buildLabelCellHtml).join('') + '</div>');
     });
   });
 
+  // 最後のページ以外に改ページを付ける（最後のページに付けると余分な空白ページが印刷されるため）
   var lastPageIndex = -1;
-  for (var i = allPages.length - 1; i >= 0; i--) {
-    if (allPages[i].indexOf('class="label-page"') !== -1) {
+  for (var i = allPagesHtml.length - 1; i >= 0; i--) {
+    if (allPagesHtml[i].indexOf('class="label-page"') !== -1) {
       lastPageIndex = i;
       break;
     }
   }
-  for (var j = 0; j < allPages.length; j++) {
-    if (j !== lastPageIndex && allPages[j].indexOf('class="label-page"') !== -1) {
-      allPages[j] = allPages[j].replace('class="label-page"', 'class="label-page page-break"');
+  for (var j = 0; j < allPagesHtml.length; j++) {
+    if (j !== lastPageIndex && allPagesHtml[j].indexOf('class="label-page"') !== -1) {
+      allPagesHtml[j] = allPagesHtml[j].replace('class="label-page"', 'class="label-page page-break"');
     }
   }
 
-  return '' +
-    '<!doctype html><html><head><meta charset="utf-8">' +
-    buildLabelStyle_(sizePreset) +
-    '</head><body>' +
-    '<div class="toolbar no-print">' +
-    '<button onclick="window.print()">印刷</button>' +
-    '<span>プレビューを確認してから印刷してください（用紙サイズ・余白はブラウザの印刷ダイアログで調整できます）。</span>' +
-    '</div>' +
-    allPages.join('') +
-    '</body></html>';
+  var pagesEl = document.getElementById('pages');
+  pagesEl.innerHTML = allPagesHtml.join('');
+  pagesEl.style.transform = 'translate(' + offsetX + 'mm, ' + offsetY + 'mm)';
+
+  var pageCount = data.caseBlocks.reduce(function (sum, b) { return sum + b.pageCells.length; }, 0);
+  document.getElementById('count').textContent = data.totalLabels + '枚 / 用紙' + pageCount + '枚';
+}
+
+document.getElementById('printBtn').addEventListener('click', function () { window.print(); });
+['startPosition', 'offsetX', 'offsetY'].forEach(function (id) {
+  document.getElementById(id).addEventListener('input', render);
+});
+render();
+</script>
+</body></html>`;
 }
 
 // ============================================================
