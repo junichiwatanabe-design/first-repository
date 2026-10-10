@@ -338,7 +338,7 @@ function collectLabelEntries_(sheet, timeZone) {
   }
 
   var dateText = formatLabelDate_(findAdjacentValue_(values, '案件実施日'), timeZone);
-  var company = String(findAdjacentValue_(values, '企業名') || '').trim();
+  var company = normalizeLabelText_(findAdjacentValue_(values, '企業名'));
 
   var menuHeader = findMenuTableHeader_(values);
   if (!menuHeader) {
@@ -352,7 +352,7 @@ function collectLabelEntries_(sheet, timeZone) {
 
   var entries = [];
   for (var r = menuHeader.row + 1; r < values.length; r++) {
-    var menuName = String(values[r][menuCol] || '').trim();
+    var menuName = normalizeLabelText_(values[r][menuCol]);
     var qty = values[r][qtyCol];
     if (!menuName || !qty) {
       continue;
@@ -360,6 +360,15 @@ function collectLabelEntries_(sheet, timeZone) {
     entries.push({ date: dateText, company: company, menu: menuName, qty: qty });
   }
   return entries;
+}
+
+/**
+ * セルの値に含まれる改行文字を半角スペースに置き換えてから前後の空白を除く。
+ * WrapStrategy.CLIPでも、セルの値自体に改行が含まれていればそのまま改行
+ * として表示されてしまうため、ラベルに使う文字列から事前に取り除く。
+ */
+function normalizeLabelText_(value) {
+  return String(value || '').replace(/[\r\n]+/g, ' ').trim();
 }
 
 /**
