@@ -172,6 +172,7 @@ function getLabelSizePreset_(configSheet) {
 var LABEL_FONT_SIZE = 14;      // 1段目（日付＋企業名）のフォントサイズ(pt)
 var LABEL_MENU_FONT_SIZE = 12; // 2段目（メニュー名）。1段目より2pt小さい
 var LABEL_QTY_FONT_SIZE = 25;  // 3段目（数量）。太字・大きめフォントで強調する
+var LABEL_COMPANY_MAX_LEN = 12; // 1段目の企業名はこの文字数を超えたら切り詰め、末尾の「様」が隠れないようにする
 
 /**
  * メニュー「ラベル作成」→「作成」から呼び出されるメイン関数。
@@ -455,6 +456,7 @@ ${buildLabelStyle_(sizePreset)}
 <div id="pages"></div>
 <script>
 var PRINT_DATA = ${dataJson};
+var COMPANY_MAX_LEN = ${LABEL_COMPANY_MAX_LEN};
 
 function escapeHtml(text) {
   return String(text)
@@ -499,7 +501,10 @@ function buildLabelCellHtml(entry) {
   if (!entry) {
     return '<div class="label-cell"></div>';
   }
-  var line1 = escapeHtml(entry.date + ' ' + entry.company + ' 様');
+  var company = entry.company.length > COMPANY_MAX_LEN
+    ? entry.company.slice(0, COMPANY_MAX_LEN)
+    : entry.company;
+  var line1 = escapeHtml(entry.date + ' ' + company + ' 様');
   var line2 = escapeHtml(entry.menu);
   var line3 = escapeHtml(String(entry.qty));
   return '<div class="label-cell">' +
