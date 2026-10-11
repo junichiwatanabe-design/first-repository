@@ -153,12 +153,12 @@ var LABEL_WIDTH_MM = 66;        // ラベル1枚の実寸幅。商品が異な�
 var LABEL_SIZE_3X8 = '3×8（66mm×33.9mm）';
 var LABEL_SIZE_3X6 = '3×6（66mm×45.2mm）';
 
-// 内訳（3段の高さmm）は、3×8は9.0/12.7/12.2（メニュー名の2行分を広めに確保し、
-// 合計33.9mmに揃えた）、3×6は45.2mmを同じ比率で配分した11.9/16.9/16.4を
-// 初期値とする。
+// 内訳（3段の高さmm）は、3×8は9.0/13.1/11.8（メニュー名の段を数量の段から
+// 約1pt分広げ、合計33.9mmに揃えた）、3×6は45.2mmを同じ比率で配分した
+// 11.9/17.3/16.0を初期値とする。
 var LABEL_SIZE_PRESETS = {};
-LABEL_SIZE_PRESETS[LABEL_SIZE_3X8] = { rows: 8, labelHeightMm: 33.9, segmentHeightsMm: [9.0, 12.7, 12.2] };
-LABEL_SIZE_PRESETS[LABEL_SIZE_3X6] = { rows: 6, labelHeightMm: 45.2, segmentHeightsMm: [11.9, 16.9, 16.4] };
+LABEL_SIZE_PRESETS[LABEL_SIZE_3X8] = { rows: 8, labelHeightMm: 33.9, segmentHeightsMm: [9.0, 13.1, 11.8] };
+LABEL_SIZE_PRESETS[LABEL_SIZE_3X6] = { rows: 6, labelHeightMm: 45.2, segmentHeightsMm: [11.9, 17.3, 16.0] };
 
 /**
  * 「設定」シートB3で選択されたラベルサイズのプリセット（行数・ラベル高さmm・
@@ -169,8 +169,8 @@ function getLabelSizePreset_(configSheet) {
   return LABEL_SIZE_PRESETS[raw] || LABEL_SIZE_PRESETS[LABEL_SIZE_3X8];
 }
 
-var LABEL_FONT_SIZE = 14;      // 1段目（日付＋企業名）のフォントサイズ(pt)
-var LABEL_MENU_FONT_SIZE = 12; // 2段目（メニュー名）。1段目より2pt小さい
+var LABEL_FONT_SIZE = 13;      // 1段目（日付＋企業名）のフォントサイズ(pt)
+var LABEL_MENU_FONT_SIZE = 12; // 2段目（メニュー名）。1段目より1pt小さい
 var LABEL_QTY_FONT_SIZE = 25;  // 3段目（数量）。太字・大きめフォントで強調する
 
 /**
@@ -408,10 +408,11 @@ body { margin: 0; font-family: sans-serif; }
   text-align: center;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-box-pack: center;
+  -webkit-box-pack: end;
   -webkit-line-clamp: 2;
   overflow: hidden;
   padding: 0 2px;
+  border-top: 1px solid #ddd;
   box-sizing: border-box;
 }
 .label-seg3 {
@@ -421,6 +422,7 @@ body { margin: 0; font-family: sans-serif; }
   display: flex;
   align-items: center;
   justify-content: center;
+  border-top: 1px solid #ddd;
   box-sizing: border-box;
 }
 @media print { .no-print { display: none; } }
