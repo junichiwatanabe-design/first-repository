@@ -403,17 +403,21 @@ body { margin: 0; font-family: sans-serif; }
 .label-seg1 .seg1-company { flex-shrink: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
 .label-seg2 {
   height: ${h[1]}mm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 2px;
+  border-top: 1px solid #ddd;
+  box-sizing: border-box;
+}
+.label-seg2 .seg2-text {
   font-size: ${LABEL_MENU_FONT_SIZE}pt;
   font-weight: bold;
   text-align: center;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-box-pack: center;
   -webkit-line-clamp: 2;
   overflow: hidden;
-  padding: 0 2px;
-  border-top: 1px solid #ddd;
-  box-sizing: border-box;
 }
 .label-seg3 {
   height: ${h[2]}mm;
@@ -510,7 +514,7 @@ function buildLabelCellHtml(entry) {
     '<span class="seg1-fixed">' + escapeHtml(entry.date) + ' </span>' +
     '<span class="seg1-company">' + escapeHtml(entry.company) + '</span>' +
     '<span class="seg1-fixed"> 様</span>';
-  var line2 = escapeHtml(entry.menu);
+  var line2 = '<div class="seg2-text">' + escapeHtml(entry.menu) + '</div>';
   var line3 = escapeHtml(String(entry.qty));
   return '<div class="label-cell">' +
     '<div class="label-seg1">' + line1 + '</div>' +
