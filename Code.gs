@@ -153,12 +153,12 @@ var LABEL_WIDTH_MM = 66;        // ラベル1枚の実寸幅。商品が異な�
 var LABEL_SIZE_3X8 = '3×8（66mm×33.9mm）';
 var LABEL_SIZE_3X6 = '3×6（66mm×45.2mm）';
 
-// 内訳（3段の高さmm）は、3×8は9.0/13.1/12.2（メニュー名の段を約1pt分
-// 広げた分、ラベル1枚分の合計高さも33.9mm→34.3mmに広がる）、3×6は
-// 同じ比率で11.9/17.3/16.4（合計45.2mm→45.6mm）を初期値とする。
+// 内訳（3段の高さmm）は、3×8は9.0/13.5/12.2（メニュー名の段をさらに約1pt分
+// 広げた分、ラベル1枚分の合計高さも34.3mm→34.7mmに広がる）、3×6は
+// 同じく11.9/17.7/16.4（合計45.6mm→46.0mm）を初期値とする。
 var LABEL_SIZE_PRESETS = {};
-LABEL_SIZE_PRESETS[LABEL_SIZE_3X8] = { rows: 8, labelHeightMm: 34.3, segmentHeightsMm: [9.0, 13.1, 12.2] };
-LABEL_SIZE_PRESETS[LABEL_SIZE_3X6] = { rows: 6, labelHeightMm: 45.6, segmentHeightsMm: [11.9, 17.3, 16.4] };
+LABEL_SIZE_PRESETS[LABEL_SIZE_3X8] = { rows: 8, labelHeightMm: 34.7, segmentHeightsMm: [9.0, 13.5, 12.2] };
+LABEL_SIZE_PRESETS[LABEL_SIZE_3X6] = { rows: 6, labelHeightMm: 46.0, segmentHeightsMm: [11.9, 17.7, 16.4] };
 
 /**
  * 「設定」シートB3で選択されたラベルサイズのプリセット（行数・ラベル高さmm・
@@ -171,7 +171,7 @@ function getLabelSizePreset_(configSheet) {
 
 var LABEL_FONT_SIZE = 13;      // 1段目（日付＋企業名）のフォントサイズ(pt)
 var LABEL_MENU_FONT_SIZE = 12; // 2段目（メニュー名）。1段目より1pt小さい
-var LABEL_QTY_FONT_SIZE = 25;  // 3段目（数量）。太字・大きめフォントで強調する
+var LABEL_QTY_FONT_SIZE = 24;  // 3段目（数量）。太字・大きめフォントで強調する
 
 /**
  * メニュー「ラベル作成」→「作成」から呼び出されるメイン関数。
@@ -545,10 +545,35 @@ function render() {
   document.getElementById('count').textContent = data.totalLabels + '枚 / 用紙' + totalPages + '枚';
 }
 
+var OFFSET_STORAGE_KEY = 'labelPrintOffset';
+
+// 前回入力したずれ補正の値をこのブラウザに保存しておき、次回ダイアログを
+// 開いたときに自動で復元する（プリンタの印字位置ずれは毎回同じことが
+// 多いため、開始位置と違って再入力の手間を省く価値がある）。
+// localStorageが使えない環境（プライベートブラウジング等）では何もしない。
+function loadSavedOffset() {
+  try {
+    var saved = JSON.parse(localStorage.getItem(OFFSET_STORAGE_KEY));
+    if (saved && typeof saved.x === 'number') document.getElementById('offsetX').value = saved.x;
+    if (saved && typeof saved.y === 'number') document.getElementById('offsetY').value = saved.y;
+  } catch (e) { /* 保存値が無い・壊れている場合は初期値（0）のまま */ }
+}
+
+function saveOffset() {
+  try {
+    var x = parseFloat(document.getElementById('offsetX').value) || 0;
+    var y = parseFloat(document.getElementById('offsetY').value) || 0;
+    localStorage.setItem(OFFSET_STORAGE_KEY, JSON.stringify({ x: x, y: y }));
+  } catch (e) { /* 保存できなくても印刷自体には影響しない */ }
+}
+
 document.getElementById('printBtn').addEventListener('click', function () { window.print(); });
 ['startPosition', 'offsetX', 'offsetY'].forEach(function (id) {
   document.getElementById(id).addEventListener('input', render);
 });
+document.getElementById('offsetX').addEventListener('input', saveOffset);
+document.getElementById('offsetY').addEventListener('input', saveOffset);
+loadSavedOffset();
 render();
 </script>
 </body></html>`;
