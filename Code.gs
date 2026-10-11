@@ -153,12 +153,12 @@ var LABEL_WIDTH_MM = 66;        // ラベル1枚の実寸幅。商品が異な�
 var LABEL_SIZE_3X8 = '3×8（66mm×33.9mm）';
 var LABEL_SIZE_3X6 = '3×6（66mm×45.2mm）';
 
-// 内訳（3段の高さmm）は、3×8は9.0/13.1/11.8（メニュー名の段を数量の段から
-// 約1pt分広げ、合計33.9mmに揃えた）、3×6は45.2mmを同じ比率で配分した
-// 11.9/17.3/16.0を初期値とする。
+// 内訳（3段の高さmm）は、3×8は9.0/13.1/12.2（メニュー名の段を約1pt分
+// 広げた分、ラベル1枚分の合計高さも33.9mm→34.3mmに広がる）、3×6は
+// 同じ比率で11.9/17.3/16.4（合計45.2mm→45.6mm）を初期値とする。
 var LABEL_SIZE_PRESETS = {};
-LABEL_SIZE_PRESETS[LABEL_SIZE_3X8] = { rows: 8, labelHeightMm: 33.9, segmentHeightsMm: [9.0, 13.1, 11.8] };
-LABEL_SIZE_PRESETS[LABEL_SIZE_3X6] = { rows: 6, labelHeightMm: 45.2, segmentHeightsMm: [11.9, 17.3, 16.0] };
+LABEL_SIZE_PRESETS[LABEL_SIZE_3X8] = { rows: 8, labelHeightMm: 34.3, segmentHeightsMm: [9.0, 13.1, 12.2] };
+LABEL_SIZE_PRESETS[LABEL_SIZE_3X6] = { rows: 6, labelHeightMm: 45.6, segmentHeightsMm: [11.9, 17.3, 16.4] };
 
 /**
  * 「設定」シートB3で選択されたラベルサイズのプリセット（行数・ラベル高さmm・
@@ -408,7 +408,7 @@ body { margin: 0; font-family: sans-serif; }
   text-align: center;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-box-pack: end;
+  -webkit-box-pack: center;
   -webkit-line-clamp: 2;
   overflow: hidden;
   padding: 0 2px;
