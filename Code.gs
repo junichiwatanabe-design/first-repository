@@ -520,35 +520,24 @@ function render() {
   var offsetY = parseFloat(document.getElementById('offsetY').value) || 0;
 
   var data = buildPagesData(PRINT_DATA.cases, startPosition, PRINT_DATA.rows, PRINT_DATA.cols, PRINT_DATA.copies);
+  var totalPages = data.caseBlocks.reduce(function (sum, b) { return sum + b.pageCells.length; }, 0);
 
-  var allPagesHtml = [];
+  // 最後のページ以外に改ページを付ける（最後のページに付けると余分な空白ページが印刷されるため）
+  var html = '';
+  var pageIndex = 0;
   data.caseBlocks.forEach(function (block) {
-    allPagesHtml.push('<div class="case-title no-print">' + escapeHtml(block.caseLabel) + '（' + block.entryCount + '件）</div>');
+    html += '<div class="case-title no-print">' + escapeHtml(block.caseLabel) + '（' + block.entryCount + '件）</div>';
     block.pageCells.forEach(function (cells) {
-      allPagesHtml.push('<div class="label-page">' + cells.map(buildLabelCellHtml).join('') + '</div>');
+      pageIndex++;
+      var pageClass = pageIndex < totalPages ? 'label-page page-break' : 'label-page';
+      html += '<div class="' + pageClass + '">' + cells.map(buildLabelCellHtml).join('') + '</div>';
     });
   });
 
-  // 最後のページ以外に改ページを付ける（最後のページに付けると余分な空白ページが印刷されるため）
-  var lastPageIndex = -1;
-  for (var i = allPagesHtml.length - 1; i >= 0; i--) {
-    if (allPagesHtml[i].indexOf('class="label-page"') !== -1) {
-      lastPageIndex = i;
-      break;
-    }
-  }
-  for (var j = 0; j < allPagesHtml.length; j++) {
-    if (j !== lastPageIndex && allPagesHtml[j].indexOf('class="label-page"') !== -1) {
-      allPagesHtml[j] = allPagesHtml[j].replace('class="label-page"', 'class="label-page page-break"');
-    }
-  }
-
   var pagesEl = document.getElementById('pages');
-  pagesEl.innerHTML = allPagesHtml.join('');
+  pagesEl.innerHTML = html;
   pagesEl.style.transform = 'translate(' + offsetX + 'mm, ' + offsetY + 'mm)';
-
-  var pageCount = data.caseBlocks.reduce(function (sum, b) { return sum + b.pageCells.length; }, 0);
-  document.getElementById('count').textContent = data.totalLabels + '枚 / 用紙' + pageCount + '枚';
+  document.getElementById('count').textContent = data.totalLabels + '枚 / 用紙' + totalPages + '枚';
 }
 
 document.getElementById('printBtn').addEventListener('click', function () { window.print(); });
