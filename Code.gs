@@ -172,7 +172,6 @@ function getLabelSizePreset_(configSheet) {
 var LABEL_FONT_SIZE = 14;      // 1段目（日付＋企業名）のフォントサイズ(pt)
 var LABEL_MENU_FONT_SIZE = 12; // 2段目（メニュー名）。1段目より2pt小さい
 var LABEL_QTY_FONT_SIZE = 25;  // 3段目（数量）。太字・大きめフォントで強調する
-var LABEL_COMPANY_MAX_LEN = 12; // 1段目の企業名はこの文字数を超えたら切り詰め、末尾の「様」が隠れないようにする
 
 /**
  * メニュー「ラベル作成」→「作成」から呼び出されるメイン関数。
@@ -400,6 +399,8 @@ body { margin: 0; font-family: sans-serif; }
   padding: 0 2px;
   box-sizing: border-box;
 }
+.label-seg1 .seg1-fixed { flex-shrink: 0; white-space: nowrap; }
+.label-seg1 .seg1-company { flex-shrink: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
 .label-seg2 {
   height: ${h[1]}mm;
   font-size: ${LABEL_MENU_FONT_SIZE}pt;
@@ -456,7 +457,6 @@ ${buildLabelStyle_(sizePreset)}
 <div id="pages"></div>
 <script>
 var PRINT_DATA = ${dataJson};
-var COMPANY_MAX_LEN = ${LABEL_COMPANY_MAX_LEN};
 
 function escapeHtml(text) {
   return String(text)
@@ -501,10 +501,13 @@ function buildLabelCellHtml(entry) {
   if (!entry) {
     return '<div class="label-cell"></div>';
   }
-  var company = entry.company.length > COMPANY_MAX_LEN
-    ? entry.company.slice(0, COMPANY_MAX_LEN)
-    : entry.company;
-  var line1 = escapeHtml(entry.date + ' ' + company + ' 様');
+  // 日付・「様」は常に全体を表示し、企業名だけがCSS側のflex-shrinkで
+  // 余った幅に合わせて自動的に省略されるようにする（固定の文字数カットでは
+  // 実際の描画幅に対応できず、「様」がはみ出して隠れることがあるため）。
+  var line1 =
+    '<span class="seg1-fixed">' + escapeHtml(entry.date) + ' </span>' +
+    '<span class="seg1-company">' + escapeHtml(entry.company) + '</span>' +
+    '<span class="seg1-fixed"> 様</span>';
   var line2 = escapeHtml(entry.menu);
   var line3 = escapeHtml(String(entry.qty));
   return '<div class="label-cell">' +
